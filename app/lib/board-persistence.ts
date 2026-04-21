@@ -1,8 +1,36 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useBoard, type Item } from "./board-store";
+import { newId, useBoard, type Item } from "./board-store";
 import { boardItemsKey, useBoards } from "./boards-store";
+
+/** Reassign any duplicate ids we read from storage. Keeps connector endpoints
+ *  (item references) pointing at the newly-assigned ids. */
+function dedupeIds(items: Item[]): Item[] {
+  const seen = new Set<string>();
+  const remap = new Map<string, string>();
+  const out: Item[] = [];
+  for (const it of items) {
+    if (!seen.has(it.id)) {
+      seen.add(it.id);
+      out.push(it);
+      continue;
+    }
+    const fresh = newId(it.type);
+    remap.set(it.id, fresh);
+    seen.add(fresh);
+    out.push({ ...it, id: fresh } as Item);
+  }
+  if (remap.size === 0) return out;
+  return out.map((it) => {
+    if (it.type !== "connector") return it;
+    const fix = (end: typeof it.from) =>
+      end.kind === "item" && remap.has(end.itemId)
+        ? { kind: "item" as const, itemId: remap.get(end.itemId)! }
+        : end;
+    return { ...it, from: fix(it.from), to: fix(it.to) };
+  });
+}
 
 type Persisted = {
   items: Item[];
@@ -41,7 +69,7 @@ export function useBoardPersistence(id: string) {
 
     const saved = readBoard(id);
     useBoard.setState({
-      items: saved?.items ?? [],
+      items: saved?.items ? dedupeIds(saved.items) : [],
       selectedIds: [],
       editingId: null,
     });

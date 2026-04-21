@@ -91,6 +91,12 @@ body {
   outline-offset: 2px;
 }
 
+/* Inputs that opt out of the focus ring (explicitly styled containers). */
+input.no-focus-ring:focus-visible,
+input.no-focus-ring:focus {
+  outline: none !important;
+}
+
 /* Utility: the pale grid canvas background */
 .canvas-grid {
   background-color: var(--bg);

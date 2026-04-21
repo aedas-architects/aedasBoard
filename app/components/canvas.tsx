@@ -11,6 +11,7 @@ import {
 } from "../lib/board-store";
 import { GRID_SIZE } from "../lib/constants";
 import { ingestClipboard, ingestFiles } from "../lib/image-ingest";
+import { computeSnap, type SnapGuide } from "../lib/snap";
 import { RESIZE_CURSOR, useGesture, type ResizeHandle } from "../lib/gesture-store";
 import { TOOL_SHORTCUTS, type Tool, useTool } from "../lib/tool-store";
 import { useUI } from "../lib/ui-store";
@@ -314,6 +315,7 @@ export function Canvas() {
   const fitToBBox = useViewport((s) => s.fitToBBox);
 
   const activeTool = useTool((s) => s.active);
+  const draftShapeKind = useTool((s) => s.shapeKind);
   const setActiveTool = useTool((s) => s.setActive);
   const spaceHeld = useTool((s) => s.spaceHeld);
   const setSpaceHeld = useTool((s) => s.setSpaceHeld);
@@ -354,6 +356,7 @@ export function Canvas() {
   const [eraserDraft, setEraserDraft] = useState<EraserDraft | null>(null);
 
   const [contextTarget, setContextTarget] = useState<ContextTarget | null>(null);
+  const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
 
   const drag = useGesture((s) => s.drag);
   const resize = useGesture((s) => s.resize);
@@ -363,11 +366,79 @@ export function Canvas() {
     if (!drag) return;
     document.body.style.cursor = "grabbing";
 
+    // Once the user actually starts moving, bring the dragged items to the
+    // front of items[] so they render above everything else in their layer
+    // (Miro behavior). Do this lazily so a plain click-without-drag doesn't
+    // mutate z-order.
+    let broughtToFront = false;
+    const MOVE_THRESHOLD = 2;
+
+    // Combined bbox of all dragging rect items at their pre-drag positions.
+    // Connectors / strokes are excluded — they shouldn't drive snap.
+    const startItems = useBoard.getState().items;
+    const movingIds = new Set(drag.targets.map((t) => t.id));
+    const snapSourceBoxes = startItems
+      .filter(
+        (it) =>
+          movingIds.has(it.id) &&
+          it.type !== "connector" &&
+          it.type !== "stroke" &&
+          it.type !== "comment",
+      )
+      .map((it) => ({
+        minX: it.x,
+        minY: it.y,
+        maxX: it.x + it.w,
+        maxY: it.y + it.h,
+      }));
+    const startBBox =
+      snapSourceBoxes.length > 0
+        ? snapSourceBoxes.reduce(
+            (acc, b) => ({
+              minX: Math.min(acc.minX, b.minX),
+              minY: Math.min(acc.minY, b.minY),
+              maxX: Math.max(acc.maxX, b.maxX),
+              maxY: Math.max(acc.maxY, b.maxY),
+            }),
+            snapSourceBoxes[0],
+          )
+        : null;
+    const staticItems = startItems.filter((it) => !movingIds.has(it.id));
+
     const onMove = (e: PointerEvent) => {
       if (e.pointerId !== drag.pointerId) return;
       const { zoom } = useViewport.getState();
-      const dx = (e.clientX - drag.clientStart.x) / zoom;
-      const dy = (e.clientY - drag.clientStart.y) / zoom;
+      const rawDx = (e.clientX - drag.clientStart.x) / zoom;
+      const rawDy = (e.clientY - drag.clientStart.y) / zoom;
+
+      // First real move → reorder so dragged items end up at the end of
+      // items[], which puts them visually on top within every layer group.
+      if (
+        !broughtToFront &&
+        (Math.abs(rawDx) > MOVE_THRESHOLD || Math.abs(rawDy) > MOVE_THRESHOLD)
+      ) {
+        broughtToFront = true;
+        useBoard.setState((s) => {
+          const moving = s.items.filter((it) => movingIds.has(it.id));
+          if (moving.length === 0) return s;
+          const rest = s.items.filter((it) => !movingIds.has(it.id));
+          return { items: [...rest, ...moving] };
+        });
+      }
+
+      // Smart snap — align moving bbox edges / centers with static siblings.
+      let dx = rawDx;
+      let dy = rawDy;
+      let guides: SnapGuide[] = [];
+      if (startBBox) {
+        const threshold = 6 / zoom;
+        const snap = computeSnap(startBBox, staticItems, rawDx, rawDy, threshold);
+        dx = snap.dx;
+        dy = snap.dy;
+        guides = snap.guides;
+      }
+      setSnapGuides(guides);
+
       const byId = new Map(drag.targets.map((t) => [t.id, t]));
       useBoard.setState((s) => ({
         items: s.items.map((it) => {
@@ -391,7 +462,10 @@ export function Canvas() {
         }),
       }));
     };
-    const onUp = () => useGesture.getState().endDrag();
+    const onUp = () => {
+      useGesture.getState().endDrag();
+      setSnapGuides([]);
+    };
 
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
@@ -925,7 +999,16 @@ export function Canvas() {
         Math.abs(e.clientX - g.startX) > 3 || Math.abs(e.clientY - g.startY) > 3;
       const passiveUpTool =
         activeTool === "select" || activeTool === "stickers";
-      if (!dragged && passiveUpTool && !e.shiftKey && !spaceHeld) {
+      // Only treat a no-drag LEFT-click on empty canvas as "deselect".
+      // Right-clicks open the context menu — clearing selection here would
+      // undo the selection the menu is about to operate on.
+      if (
+        !dragged &&
+        passiveUpTool &&
+        !e.shiftKey &&
+        !spaceHeld &&
+        e.button === 0
+      ) {
         useBoard.getState().clearSelection();
       }
       return;
@@ -1091,6 +1174,13 @@ export function Canvas() {
         e.preventDefault();
         const itemId = findItemIdAt(e.clientX, e.clientY);
         if (itemId) {
+          // Ensure the right-clicked item is part of the selection BEFORE the
+          // menu renders, so menu actions (which read from selectedIds) apply
+          // to the intended target even on the very first click.
+          const sel = useBoard.getState().selectedIds;
+          if (!sel.includes(itemId)) {
+            useBoard.getState().setSelection([itemId]);
+          }
           setContextTarget({
             kind: "item",
             id: itemId,
@@ -1134,7 +1224,6 @@ export function Canvas() {
         style={{
           transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
           transformOrigin: "0 0",
-          willChange: "transform",
         }}
       >
         {/* Data-driven items */}
@@ -1170,6 +1259,119 @@ export function Canvas() {
           const h = Math.max(1, Math.abs(e.y - s.y));
           const dragged = w > 4 || h > 4;
           if (!dragged) return null;
+
+          const stroke = "var(--accent)";
+          const fill = "rgba(217, 74, 56, 0.06)";
+          const sw = 1.5 / zoom;
+          const dash = `${6 / zoom} ${4 / zoom}`;
+
+          // For shape tool, preview the actual shape outline instead of a
+          // generic rectangle so oval/triangle/etc. match the final result.
+          if (creationDraft.tool === "shape") {
+            const pathFor = (): string | null => {
+              switch (draftShapeKind) {
+                case "triangle":
+                  return `M ${w / 2} 0 L ${w} ${h} L 0 ${h} Z`;
+                case "rhombus":
+                  return `M ${w / 2} 0 L ${w} ${h / 2} L ${w / 2} ${h} L 0 ${h / 2} Z`;
+                case "pentagon": {
+                  const cx = w / 2;
+                  const cy = h / 2;
+                  const rx = w / 2;
+                  const ry = h / 2;
+                  const pts: string[] = [];
+                  for (let i = 0; i < 5; i++) {
+                    const a = -Math.PI / 2 + (i * 2 * Math.PI) / 5;
+                    pts.push(`${cx + rx * Math.cos(a)} ${cy + ry * Math.sin(a)}`);
+                  }
+                  return `M ${pts.join(" L ")} Z`;
+                }
+                case "hexagon": {
+                  const cx = w / 2;
+                  const cy = h / 2;
+                  const rx = w / 2;
+                  const ry = h / 2;
+                  const pts: string[] = [];
+                  for (let i = 0; i < 6; i++) {
+                    const a = (i * Math.PI) / 3;
+                    pts.push(`${cx + rx * Math.cos(a)} ${cy + ry * Math.sin(a)}`);
+                  }
+                  return `M ${pts.join(" L ")} Z`;
+                }
+                case "octagon": {
+                  const cx = w / 2;
+                  const cy = h / 2;
+                  const rx = w / 2;
+                  const ry = h / 2;
+                  const pts: string[] = [];
+                  for (let i = 0; i < 8; i++) {
+                    const a = -Math.PI / 8 + (i * Math.PI) / 4;
+                    pts.push(`${cx + rx * Math.cos(a)} ${cy + ry * Math.sin(a)}`);
+                  }
+                  return `M ${pts.join(" L ")} Z`;
+                }
+                default:
+                  return null;
+              }
+            };
+
+            if (draftShapeKind === "oval") {
+              return (
+                <svg
+                  className="pointer-events-none absolute overflow-visible"
+                  style={{ left: x, top: y, width: w, height: h }}
+                >
+                  <ellipse
+                    cx={w / 2}
+                    cy={h / 2}
+                    rx={Math.max(0.5, w / 2 - sw / 2)}
+                    ry={Math.max(0.5, h / 2 - sw / 2)}
+                    fill={fill}
+                    stroke={stroke}
+                    strokeWidth={sw}
+                    strokeDasharray={dash}
+                  />
+                </svg>
+              );
+            }
+
+            const d = pathFor();
+            if (d) {
+              return (
+                <svg
+                  className="pointer-events-none absolute overflow-visible"
+                  style={{ left: x, top: y, width: w, height: h }}
+                >
+                  <path
+                    d={d}
+                    fill={fill}
+                    stroke={stroke}
+                    strokeWidth={sw}
+                    strokeDasharray={dash}
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              );
+            }
+
+            const radius =
+              draftShapeKind === "rounded" ? Math.min(w, h) * 0.18 : 4 / zoom;
+            return (
+              <div
+                className="pointer-events-none absolute"
+                style={{
+                  left: x,
+                  top: y,
+                  width: w,
+                  height: h,
+                  border: `${sw}px dashed ${stroke}`,
+                  borderRadius: radius,
+                  background: fill,
+                }}
+              />
+            );
+          }
+
           return (
             <div
               className="pointer-events-none absolute"
@@ -1178,13 +1380,52 @@ export function Canvas() {
                 top: y,
                 width: w,
                 height: h,
-                border: `${1.5 / zoom}px dashed var(--accent)`,
-                borderRadius: creationDraft.tool === "shape" ? 4 / zoom : 2 / zoom,
-                background: "rgba(217, 74, 56, 0.06)",
+                border: `${sw}px dashed ${stroke}`,
+                borderRadius: 2 / zoom,
+                background: fill,
               }}
             />
           );
         })()}
+
+        {/* Alignment guides (rendered while dragging) */}
+        {snapGuides.length > 0 && (
+          <svg
+            className="pointer-events-none absolute overflow-visible"
+            style={{ left: 0, top: 0, width: 1, height: 1 }}
+          >
+            {snapGuides.map((g, i) => {
+              const stroke = "var(--accent)";
+              const strokeWidth = 1 / zoom;
+              if (g.axis === "x") {
+                return (
+                  <line
+                    key={`g-${i}`}
+                    x1={g.at}
+                    y1={g.start}
+                    x2={g.at}
+                    y2={g.end}
+                    stroke={stroke}
+                    strokeWidth={strokeWidth}
+                    strokeDasharray={`${4 / zoom} ${4 / zoom}`}
+                  />
+                );
+              }
+              return (
+                <line
+                  key={`g-${i}`}
+                  x1={g.start}
+                  y1={g.at}
+                  x2={g.end}
+                  y2={g.at}
+                  stroke={stroke}
+                  strokeWidth={strokeWidth}
+                  strokeDasharray={`${4 / zoom} ${4 / zoom}`}
+                />
+              );
+            })}
+          </svg>
+        )}
 
         {/* In-flight connector preview */}
         {connectorDraft && (

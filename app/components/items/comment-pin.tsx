@@ -5,7 +5,7 @@ import { motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { useBoard, type CommentItem, type CommentMessage } from "../../lib/board-store";
 import { useViewport } from "../../lib/viewport-store";
-import { useTool } from "../../lib/tool-store";
+import { useItemPointerHandler } from "./selectable";
 
 const PIN_SIZE = 36;
 
@@ -29,24 +29,31 @@ function formatRelative(ts: number) {
 
 export function CommentPin({ item, selected }: { item: CommentItem; selected: boolean }) {
   const zoom = useViewport((s) => s.zoom);
-  const select = useBoard((s) => s.select);
   const updateItem = useBoard((s) => s.updateItem);
   const removeItem = useBoard((s) => s.removeItem);
-  const setActive = useTool((s) => s.setActive);
+  const onItemPointerDown = useItemPointerHandler(item.id);
 
   const [open, setOpen] = useState(item.thread.length === 0);
+  const pressRef = useRef<{ x: number; y: number } | null>(null);
 
   // Counter-scale so the pin keeps a fixed screen size regardless of zoom.
   const inv = 1 / zoom;
   const pinSize = PIN_SIZE;
 
-  function onPinDown(e: React.PointerEvent) {
-    const { spaceHeld } = useTool.getState();
-    if (spaceHeld || e.button === 1 || e.button === 2) return;
-    e.stopPropagation();
-    setActive("select");
-    select(item.id, e.shiftKey);
-    setOpen((v) => !v);
+  function onPinDown(e: React.PointerEvent<HTMLElement>) {
+    // Record press origin so we can distinguish a click (toggle panel) from
+    // a drag (let the shared drag gesture move the pin).
+    pressRef.current = { x: e.clientX, y: e.clientY };
+    onItemPointerDown(e);
+  }
+
+  function onPinUp(e: React.PointerEvent<HTMLElement>) {
+    const start = pressRef.current;
+    pressRef.current = null;
+    if (!start) return;
+    const moved =
+      Math.abs(e.clientX - start.x) > 3 || Math.abs(e.clientY - start.y) > 3;
+    if (!moved && e.button === 0) setOpen((v) => !v);
   }
 
   const addMessage = (text: string) => {
@@ -96,6 +103,7 @@ export function CommentPin({ item, selected }: { item: CommentItem; selected: bo
             whileTap={{ scale: 0.94 }}
             transition={{ type: "spring", stiffness: 500, damping: 28 }}
             onPointerDown={onPinDown}
+            onPointerUp={onPinUp}
             className="flex items-center justify-center text-white"
             style={{
               width: pinSize,

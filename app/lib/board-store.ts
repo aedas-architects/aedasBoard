@@ -12,6 +12,7 @@ type ItemBase = {
   h: number;
   rotation: number;
   locked?: boolean;
+  link?: string;
 };
 
 export type StickyItem = ItemBase & {
@@ -166,6 +167,68 @@ export const setClipboard = (items: Item[] | null) => {
   _clipboard = items ? items.map((it) => ({ ...it })) : null;
 };
 
+/** Style-only clipboard — captures visual properties of an item so the user
+ *  can apply them to another item of the SAME type. */
+export type StyleSnapshot =
+  | { type: "sticky"; color: string; textColor: string; fontFamily?: FontFamily; fontSize?: number; fontWeight?: number; italic?: boolean; underline?: boolean; align?: TextAlign }
+  | { type: "shape"; fill: string; stroke: string }
+  | { type: "text"; fontFamily?: FontFamily; fontSize: number; fontWeight?: number; italic?: boolean; underline?: boolean; align?: TextAlign; color?: string }
+  | { type: "connector"; stroke: string; strokeWidth: number; variant?: ConnectorVariant; arrowEnd: boolean; arrowStart?: boolean }
+  | { type: "frame"; fill?: string; stroke?: string }
+  | { type: "stroke"; color: string; strokeWidth: number };
+
+let _styleClipboard: StyleSnapshot | null = null;
+export const getStyleClipboard = () => _styleClipboard;
+export const setStyleClipboard = (snap: StyleSnapshot | null) => {
+  _styleClipboard = snap;
+};
+
+/** Pull a StyleSnapshot from a live item (returns null for types without styles). */
+export function snapshotStyle(item: Item): StyleSnapshot | null {
+  switch (item.type) {
+    case "sticky":
+      return {
+        type: "sticky",
+        color: item.color,
+        textColor: item.textColor,
+        fontFamily: item.fontFamily,
+        fontSize: item.fontSize,
+        fontWeight: item.fontWeight,
+        italic: item.italic,
+        underline: item.underline,
+        align: item.align,
+      };
+    case "shape":
+      return { type: "shape", fill: item.fill, stroke: item.stroke };
+    case "text":
+      return {
+        type: "text",
+        fontFamily: item.fontFamily,
+        fontSize: item.fontSize,
+        fontWeight: item.fontWeight,
+        italic: item.italic,
+        underline: item.underline,
+        align: item.align,
+        color: item.color,
+      };
+    case "connector":
+      return {
+        type: "connector",
+        stroke: item.stroke,
+        strokeWidth: item.strokeWidth,
+        variant: item.variant,
+        arrowEnd: item.arrowEnd,
+        arrowStart: item.arrowStart,
+      };
+    case "frame":
+      return { type: "frame", fill: item.fill, stroke: item.stroke };
+    case "stroke":
+      return { type: "stroke", color: item.color, strokeWidth: item.strokeWidth };
+    default:
+      return null;
+  }
+}
+
 /* -------- Store -------- */
 
 const HISTORY_CAP = 200;
@@ -222,6 +285,13 @@ type BoardState = {
   cutSelection: () => void;
   pasteClipboard: (at?: { x: number; y: number }) => void;
 
+  /** Style clipboard */
+  copyStyleFromSelection: () => void;
+  pasteStyleToSelection: () => void;
+
+  /** Wrap the current selection in a new frame with padding. */
+  frameAroundSelection: () => void;
+
   /** History */
   snapshot: () => void;
   undo: () => void;
@@ -235,7 +305,14 @@ type BoardState = {
 
 export const newId = (() => {
   let n = 1000;
-  return (prefix: string) => `${prefix}_${++n}`;
+  return (prefix: string) => {
+    // A monotonically increasing counter alone collides after a page reload
+    // (items persisted with id `shape_1001` then a fresh session generates
+    // `shape_1001` again). Mix in a short random suffix so ids stay unique
+    // across reloads without requiring id reconciliation on hydrate.
+    const rand = Math.random().toString(36).slice(2, 6);
+    return `${prefix}_${++n}_${rand}`;
+  };
 })();
 
 export const useBoard = create<BoardState>((set, get) => {
@@ -555,6 +632,69 @@ export const useBoard = create<BoardState>((set, get) => {
       set({
         items: get().items.filter((it) => !sel.has(it.id) || it.locked),
         selectedIds: [],
+      });
+    },
+
+    copyStyleFromSelection: () => {
+      const sel = get().selectedIds;
+      if (sel.length === 0) return;
+      const first = get().items.find((it) => sel.includes(it.id));
+      if (!first) return;
+      const snap = snapshotStyle(first);
+      if (snap) setStyleClipboard(snap);
+    },
+
+    pasteStyleToSelection: () => {
+      const snap = getStyleClipboard();
+      if (!snap) return;
+      const sel = new Set(get().selectedIds);
+      if (sel.size === 0) return;
+      snapshot();
+      set({
+        items: get().items.map((it) => {
+          if (!sel.has(it.id)) return it;
+          if (it.type !== snap.type) return it;
+          // TypeScript narrows via the type check above — spread the snap
+          // excluding its own `type` discriminator.
+          const { type: _type, ...rest } = snap;
+          void _type;
+          return { ...it, ...rest } as Item;
+        }),
+      });
+    },
+
+    frameAroundSelection: () => {
+      const sel = new Set(get().selectedIds);
+      if (sel.size === 0) return;
+      const boxes = get()
+        .items.filter(
+          (it) =>
+            sel.has(it.id) && it.type !== "connector" && it.type !== "comment",
+        )
+        .map(itemBBox);
+      if (boxes.length === 0) return;
+      const pad = 40;
+      const minX = Math.min(...boxes.map((b) => b.minX)) - pad;
+      const minY = Math.min(...boxes.map((b) => b.minY)) - pad - 10;
+      const maxX = Math.max(...boxes.map((b) => b.maxX)) + pad;
+      const maxY = Math.max(...boxes.map((b) => b.maxY)) + pad;
+      const frame: Item = {
+        id: newId("frame"),
+        type: "frame",
+        x: minX,
+        y: minY,
+        w: maxX - minX,
+        h: maxY - minY,
+        rotation: 0,
+        title: "Frame",
+      };
+      snapshot();
+      // Put the frame at the START of items[] so it renders under content (the
+      // sort helper keeps frames at the bottom, but they appear first among
+      // frames — putting it first is fine).
+      set({
+        items: [frame, ...get().items],
+        selectedIds: [frame.id],
       });
     },
 

@@ -65,6 +65,20 @@ export function useItemPointerHandler(id: ItemId) {
     const isPanGesture = spaceHeld || e.button === 1 || e.button === 2;
     if (isPanGesture) return;
 
+    // Cmd/Ctrl + click on a linked item → open its URL in a new tab.
+    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
+      const live = useBoard.getState().items.find((it) => it.id === id);
+      if (live?.link) {
+        e.stopPropagation();
+        try {
+          window.open(live.link, "_blank", "noopener,noreferrer");
+        } catch {
+          /* ignored */
+        }
+        return;
+      }
+    }
+
     // Tools that work on items but don't select them — let the canvas root
     // handle the gesture by NOT stopping propagation.
     if (active === "eraser" || active === "connector") return;
@@ -89,6 +103,10 @@ export function useItemPointerHandler(id: ItemId) {
     if (e.altKey) {
       useBoard.getState().duplicateInPlace();
     }
+
+    // Bring the picked-up selection to the top so it isn't obscured while
+    // being moved (matches Miro / Figma behavior).
+    useBoard.getState().bringToFront();
 
     const fresh = useBoard.getState();
     const withChildren = expandWithFrameChildren(fresh.selectedIds, fresh.items);

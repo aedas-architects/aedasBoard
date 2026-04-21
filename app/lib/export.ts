@@ -128,6 +128,17 @@ export async function exportPNG(boardName: string, items: Item[], backgroundColo
   download(blob, `${slug(boardName)}.png`);
 }
 
+/** Render the given items to a PNG blob and write it to the system clipboard. */
+export async function copyItemsAsImage(items: Item[], backgroundColor: string) {
+  if (items.length === 0) throw new Error("Nothing to copy.");
+  if (!navigator.clipboard || typeof ClipboardItem === "undefined") {
+    throw new Error("Clipboard image copy isn't supported in this browser.");
+  }
+  const svg = buildSVG(items, backgroundColor);
+  const blob = await svgToPngBlob(svg.body, svg.width, svg.height, 2);
+  await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+}
+
 /** Open the board in a new window and trigger the browser's print dialog.
  *  The user can choose "Save as PDF" from there — zero dependencies. */
 export function exportPDF(boardName: string, items: Item[], backgroundColor: string) {
