@@ -13,8 +13,9 @@ import {
   Trash2,
   Underline,
 } from "lucide-react";
+import type { StrokeDash } from "../lib/board-store";
 import { AnimatePresence, motion } from "motion/react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   useBoard,
   type ConnectorItem,
@@ -28,6 +29,12 @@ import {
   type TextAlign,
   type TextItem,
 } from "../lib/board-store";
+
+const DASH_STYLES: { id: StrokeDash; label: string }[] = [
+  { id: "solid", label: "Solid" },
+  { id: "dashed", label: "Dashed" },
+  { id: "dotted", label: "Dotted" },
+];
 import { useTool } from "../lib/tool-store";
 
 const SWATCHES = [
@@ -94,6 +101,15 @@ const PEN_COLORS = [
   "#7A4DB8",
 ];
 
+const PEN_PALETTE = [
+  "#FFF176", "#FFD600", "#F9A825", "#FFFFFF",
+  "#FFAB91", "#FF7043", "#6D4C41", "#E0E0E0",
+  "#F48FB1", "#E53935", "#B71C1C", "#9E9E9E",
+  "#A5D6A7", "#43A047", "#1B5E20", "#616161",
+  "#90CAF9", "#1E88E5", "#0D47A1", "#212121",
+  "#CE93D8", "#8E24AA", "#4A148C",
+];
+
 const STROKE_WIDTHS = [
   { w: 2, label: "Thin" },
   { w: 4, label: "Medium" },
@@ -151,6 +167,8 @@ export function StyleBar() {
   const showFrameControls = selectedFrames.length > 0;
   const showStrokeControls = selectedStrokes.length > 0;
   const showConnectorControls = selectedConnectors.length > 0;
+  const showPenControls =
+    (activeTool === "pen" || activeTool === "highlighter") && selectedIds.length === 0;
 
   const hasStyleTool =
     activeTool === "pen" || activeTool === "highlighter" || activeTool === "text";
@@ -168,6 +186,8 @@ export function StyleBar() {
           onPointerDown={(e) => e.stopPropagation()}
           className="pointer-events-auto absolute left-1/2 top-[78px] z-30 flex -translate-x-1/2 items-center gap-1.5 rounded-[var(--r-2xl)] border border-[var(--line)] bg-panel px-2 py-1.5 shadow-[var(--shadow-md)]"
         >
+          {showPenControls && <PenToolControls />}
+
           {showTextControls && (
             <TextControls items={textLike} updateItem={updateItem} />
           )}
@@ -251,6 +271,153 @@ export function StyleBar() {
         </motion.div>
       )}
     </AnimatePresence>
+  );
+}
+
+function PenToolControls() {
+  const activeTool = useTool((s) => s.active);
+  const penPresets = useTool((s) => s.penPresets);
+  const activePenPreset = useTool((s) => s.activePenPreset);
+  const setPenPreset = useTool((s) => s.setPenPreset);
+  const setActivePenPreset = useTool((s) => s.setActivePenPreset);
+
+  const [popupOpen, setPopupOpen] = useState(false);
+  const customColorRef = useRef<HTMLInputElement>(null);
+
+  const isHighlighter = activeTool === "highlighter";
+  const widthMin = isHighlighter ? 8 : 1;
+  const widthMax = isHighlighter ? 48 : 32;
+  const activePreset = penPresets[activePenPreset];
+
+  const handlePresetClick = (idx: 0 | 1 | 2) => {
+    if (idx === activePenPreset) {
+      setPopupOpen((v) => !v);
+    } else {
+      setActivePenPreset(idx);
+      setPopupOpen(false);
+    }
+  };
+
+  return (
+    <div className="relative flex items-center gap-0.5 px-1">
+      {penPresets.map((preset, idx) => {
+        const isActive = idx === activePenPreset;
+        return (
+          <motion.button
+            key={idx}
+            type="button"
+            whileTap={{ scale: 0.88 }}
+            whileHover={{ scale: 1.08 }}
+            transition={{ type: "spring", stiffness: 500, damping: 28 }}
+            onClick={() => handlePresetClick(idx as 0 | 1 | 2)}
+            className="relative flex items-center justify-center rounded-full"
+            style={{ width: 28, height: 28 }}
+            aria-label={`Pen preset ${idx + 1}`}
+            aria-pressed={isActive}
+          >
+            {isActive && (
+              <span
+                className="absolute inset-0 rounded-full"
+                style={{ boxShadow: "0 0 0 2px var(--accent)" }}
+              />
+            )}
+            <span
+              className="rounded-full"
+              style={{
+                width: isActive ? 18 : 14,
+                height: isActive ? 18 : 14,
+                background: preset.color,
+                border: "1.5px solid rgba(0,0,0,0.18)",
+                transition: "all 0.15s",
+              }}
+            />
+          </motion.button>
+        );
+      })}
+
+      {popupOpen && (
+        <>
+          <div className="fixed inset-0 z-10" onPointerDown={() => setPopupOpen(false)} />
+          <motion.div
+            initial={{ opacity: 0, y: 6, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.14 }}
+            onPointerDown={(e) => e.stopPropagation()}
+            className="absolute left-1/2 top-[calc(100%+8px)] z-20 -translate-x-1/2 rounded-[var(--r-xl)] border border-[var(--line)] bg-panel p-3 shadow-[var(--shadow-md)]"
+            style={{ width: 172 }}
+          >
+            {/* Width slider with visual preview */}
+            <div className="mb-3 flex flex-col gap-1.5">
+              <div className="flex items-center justify-center" style={{ height: 20 }}>
+                <span
+                  className="rounded-full"
+                  style={{
+                    width: Math.max(8, Math.min(60, activePreset.width * 2)),
+                    height: Math.max(2, Math.min(12, activePreset.width / 2)),
+                    background: activePreset.color,
+                    transition: "all 0.1s",
+                  }}
+                />
+              </div>
+              <input
+                type="range"
+                min={widthMin}
+                max={widthMax}
+                value={activePreset.width}
+                onChange={(e) =>
+                  setPenPreset(activePenPreset, { width: Number(e.target.value) })
+                }
+                className="w-full"
+                style={{ accentColor: activePreset.color }}
+              />
+            </div>
+
+            {/* Color grid */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(4, 1fr)",
+                gap: 6,
+              }}
+            >
+              {PEN_PALETTE.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setPenPreset(activePenPreset, { color: c })}
+                  className="rounded-full border border-[var(--line)]"
+                  style={{
+                    width: 24,
+                    height: 24,
+                    background: c,
+                    boxShadow:
+                      c === activePreset.color ? "0 0 0 2px var(--accent)" : undefined,
+                  }}
+                  aria-label={`Color ${c}`}
+                />
+              ))}
+              <button
+                type="button"
+                onClick={() => customColorRef.current?.click()}
+                title="Custom color"
+                className="flex items-center justify-center rounded-full border border-[var(--line)] bg-panel-soft text-ink-soft hover:bg-panel"
+                style={{ width: 24, height: 24 }}
+              >
+                <Plus size={12} strokeWidth={2} />
+              </button>
+            </div>
+
+            <input
+              ref={customColorRef}
+              type="color"
+              className="sr-only"
+              value={activePreset.color.startsWith("#") ? activePreset.color : "#1a1a1a"}
+              onChange={(e) => setPenPreset(activePenPreset, { color: e.target.value })}
+            />
+          </motion.div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -521,12 +688,16 @@ function ShapeControls({
   const first = shapes[0];
   const fill = first?.fill ?? "#FFFFFF";
   const stroke = first?.stroke ?? "var(--ink)";
+  const strokeDash: StrokeDash = first?.strokeDash ?? "solid";
 
   const applyFill = (c: string) => {
     for (const s of shapes) updateItem(s.id, { fill: c });
   };
   const applyStroke = (c: string) => {
     for (const s of shapes) updateItem(s.id, { stroke: c });
+  };
+  const applyDash = (d: StrokeDash) => {
+    for (const s of shapes) updateItem(s.id, { strokeDash: d });
   };
 
   return (
@@ -560,7 +731,42 @@ function ShapeControls({
           />
         )}
       />
+      <span className="h-5 w-px bg-[var(--line)]" />
+      <div className="flex items-center gap-0.5">
+        {DASH_STYLES.map(({ id, label }) => (
+          <button
+            key={id}
+            type="button"
+            title={label}
+            onClick={() => applyDash(id)}
+            className={`flex h-8 w-8 items-center justify-center rounded-[var(--r-md)] ${
+              strokeDash === id ? "bg-ink text-white" : "text-ink-soft hover:bg-panel-soft"
+            }`}
+            aria-pressed={strokeDash === id}
+          >
+            <StrokeDashGlyph id={id} />
+          </button>
+        ))}
+      </div>
     </>
+  );
+}
+
+function StrokeDashGlyph({ id }: { id: StrokeDash }) {
+  const dash =
+    id === "dashed" ? "4 3" :
+    id === "dotted" ? "1 3" :
+    undefined;
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16">
+      <line
+        x1="2" y1="8" x2="14" y2="8"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        {...(dash ? { strokeDasharray: dash } : {})}
+      />
+    </svg>
   );
 }
 
@@ -669,6 +875,26 @@ function ConnectorControls({
     }
   };
 
+  const flipDirection = () => {
+    for (const conn of connectors) {
+      updateItem(conn.id, {
+        from: conn.to,
+        to: conn.from,
+        arrowStart: conn.arrowEnd,
+        arrowEnd: conn.arrowStart ?? false,
+      });
+    }
+  };
+
+  const toggleElbowAxis = () => {
+    for (const conn of connectors) {
+      const current = conn.elbowAxis ?? "h";
+      updateItem(conn.id, { elbowAxis: current === "h" ? "v" : "h" });
+    }
+  };
+
+  const hasElbow = connectors.some((c) => c.variant === "elbow");
+
   return (
     <div className="flex items-center gap-1">
       <ColorPicker
@@ -703,6 +929,49 @@ function ConnectorControls({
           );
         })}
       </div>
+      <span className="h-5 w-px bg-[var(--line)]" />
+      <button
+        type="button"
+        onClick={flipDirection}
+        title="Flip direction"
+        className="flex h-8 w-8 items-center justify-center rounded-[var(--r-md)] text-ink-soft hover:bg-panel-soft"
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16">
+          <path d="M3 5 L13 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          <polygon points="3,5 6,3 6,7" fill="currentColor" />
+          <path d="M13 11 L3 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          <polygon points="13,11 10,9 10,13" fill="currentColor" />
+        </svg>
+      </button>
+      {hasElbow && (
+        <button
+          type="button"
+          onClick={toggleElbowAxis}
+          title="Swap elbow axis (horizontal/vertical first)"
+          className="flex h-8 w-8 items-center justify-center rounded-[var(--r-md)] text-ink-soft hover:bg-panel-soft"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16">
+            <path
+              d="M3 13 L3 6 L13 6"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              fill="none"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <path
+              d="M3 13 L10 13 L10 6"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              fill="none"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeDasharray="2 2"
+              opacity="0.5"
+            />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }

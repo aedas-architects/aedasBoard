@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { useActivity } from "./activity-store";
 
 /* -------- Types -------- */
 
@@ -50,12 +51,15 @@ export type ShapeKind =
   | "brace-left"
   | "brace-right";
 
+export type StrokeDash = "solid" | "dashed" | "dotted";
+
 export type ShapeItem = ItemBase & {
   type: "shape";
   kind: ShapeKind;
   text: string;
   fill: string;
   stroke: string;
+  strokeDash?: StrokeDash;
 };
 
 export type FontFamily = "sans" | "serif" | "mono";
@@ -105,6 +109,9 @@ export type ConnectorItem = ItemBase & {
   arrowEnd: boolean;
   arrowStart?: boolean;
   variant?: ConnectorVariant;
+  /** For elbow variant: which axis to route through first. Defaults to
+   *  whichever delta is larger. */
+  elbowAxis?: "h" | "v";
   label?: string;
 };
 
@@ -131,6 +138,11 @@ export type ImageItem = ItemBase & {
   alt?: string;
 };
 
+export type GroupItem = ItemBase & {
+  type: "group";
+  childIds: ItemId[];
+};
+
 export type Item =
   | StickyItem
   | ShapeItem
@@ -139,7 +151,8 @@ export type Item =
   | StrokeItem
   | ConnectorItem
   | CommentItem
-  | ImageItem;
+  | ImageItem
+  | GroupItem;
 
 /* -------- Bounding-box helpers -------- */
 
@@ -224,6 +237,8 @@ export function snapshotStyle(item: Item): StyleSnapshot | null {
       return { type: "frame", fill: item.fill, stroke: item.stroke };
     case "stroke":
       return { type: "stroke", color: item.color, strokeWidth: item.strokeWidth };
+    case "group":
+      return null;
     default:
       return null;
   }
@@ -292,6 +307,11 @@ type BoardState = {
   /** Wrap the current selection in a new frame with padding. */
   frameAroundSelection: () => void;
 
+  /** Group selected items under a new GroupItem (Cmd+G). */
+  groupSelected: () => void;
+  /** Dissolve selected groups back to their children (Cmd+Shift+G). */
+  ungroupSelected: () => void;
+
   /** History */
   snapshot: () => void;
   undo: () => void;
@@ -301,6 +321,7 @@ type BoardState = {
 
   /** Introspection */
   contentBBox: () => ReturnType<typeof itemBBox> | null;
+  selectionBBox: () => ReturnType<typeof itemBBox> | null;
 };
 
 export const newId = (() => {
@@ -374,6 +395,9 @@ export const useBoard = create<BoardState>((set, get) => {
           if (it.type === "sticky" || it.type === "text" || it.type === "shape") {
             return { ...it, text };
           }
+          if (it.type === "connector") {
+            return { ...it, label: text };
+          }
           return it;
         }),
       }),
@@ -393,6 +417,16 @@ export const useBoard = create<BoardState>((set, get) => {
     addItem: (item) => {
       snapshot();
       set({ items: [...get().items, item] });
+      const label = item.type === "sticky" ? "added sticky note"
+        : item.type === "text" ? "added text"
+        : item.type === "shape" ? `added shape`
+        : item.type === "frame" ? "added frame"
+        : item.type === "connector" ? "added connector"
+        : item.type === "stroke" ? "added drawing"
+        : item.type === "image" ? "added image"
+        : item.type === "comment" ? "added comment"
+        : "added group";
+      useActivity.getState().log(label);
     },
 
     removeItem: (id) => {
@@ -408,11 +442,19 @@ export const useBoard = create<BoardState>((set, get) => {
       const sel = new Set(get().selectedIds);
       if (sel.size === 0) return;
       snapshot();
+      // Also collect children of any selected groups.
+      const toDelete = new Set(sel);
+      for (const it of get().items) {
+        if (it.type === "group" && sel.has(it.id)) {
+          for (const cid of it.childIds) toDelete.add(cid);
+        }
+      }
+      useActivity.getState().log(`deleted ${sel.size} item${sel.size > 1 ? "s" : ""}`);
       set({
-        items: get().items.filter((it) => !sel.has(it.id) || it.locked),
+        items: get().items.filter((it) => !toDelete.has(it.id) || (it.locked && sel.has(it.id))),
         selectedIds: [],
         editingId:
-          get().editingId && sel.has(get().editingId!)
+          get().editingId && toDelete.has(get().editingId!)
             ? null
             : get().editingId,
       });
@@ -422,17 +464,29 @@ export const useBoard = create<BoardState>((set, get) => {
       const sel = new Set(get().selectedIds);
       if (sel.size === 0) return;
       snapshot();
-      const copies = get()
-        .items.filter((it) => sel.has(it.id))
-        .map((it) => ({
-          ...it,
-          id: newId(it.type),
-          x: it.x + 30,
-          y: it.y + 30,
-        }));
+      useActivity.getState().log(`duplicated ${sel.size} item${sel.size > 1 ? "s" : ""}`);
+      // Pull in group children that aren't already selected.
+      const toClone = new Set(sel);
+      for (const it of get().items) {
+        if (it.type === "group" && sel.has(it.id)) {
+          for (const cid of it.childIds) toClone.add(cid);
+        }
+      }
+      const idMap = new Map<ItemId, ItemId>();
+      const sources = get().items.filter((it) => toClone.has(it.id));
+      for (const it of sources) idMap.set(it.id, newId(it.type));
+      const copies = sources.map((it) => ({
+        ...it,
+        id: idMap.get(it.id)!,
+        x: it.x + 30,
+        y: it.y + 30,
+        ...(it.type === "group"
+          ? { childIds: (it as GroupItem).childIds.map((c) => idMap.get(c) ?? c) }
+          : {}),
+      }));
       set({
         items: [...get().items, ...copies],
-        selectedIds: copies.map((c) => c.id),
+        selectedIds: [...sel].map((id) => idMap.get(id)!).filter(Boolean),
       });
     },
 
@@ -606,20 +660,41 @@ export const useBoard = create<BoardState>((set, get) => {
       const sel = new Set(get().selectedIds);
       if (sel.size === 0) return [];
       snapshot();
-      const copies = get()
-        .items.filter((it) => sel.has(it.id))
-        .map((it) => ({ ...it, id: newId(it.type), locked: false }));
+      const toClone = new Set(sel);
+      for (const it of get().items) {
+        if (it.type === "group" && sel.has(it.id)) {
+          for (const cid of it.childIds) toClone.add(cid);
+        }
+      }
+      const idMap = new Map<ItemId, ItemId>();
+      const sources = get().items.filter((it) => toClone.has(it.id));
+      for (const it of sources) idMap.set(it.id, newId(it.type));
+      const copies = sources.map((it) => ({
+        ...it,
+        id: idMap.get(it.id)!,
+        locked: false,
+        ...(it.type === "group"
+          ? { childIds: (it as GroupItem).childIds.map((c) => idMap.get(c) ?? c) }
+          : {}),
+      }));
       set({
         items: [...get().items, ...copies],
-        selectedIds: copies.map((c) => c.id),
+        selectedIds: [...sel].map((id) => idMap.get(id)!).filter(Boolean),
       });
-      return copies.map((c) => c.id);
+      return [...sel].map((id) => idMap.get(id)!).filter(Boolean);
     },
 
     copySelection: () => {
       const sel = new Set(get().selectedIds);
       if (sel.size === 0) return;
-      const copied = get().items.filter((it) => sel.has(it.id));
+      // Include group children so paste can reconstruct groups.
+      const toInclude = new Set(sel);
+      for (const it of get().items) {
+        if (it.type === "group" && sel.has(it.id)) {
+          for (const cid of it.childIds) toInclude.add(cid);
+        }
+      }
+      const copied = get().items.filter((it) => toInclude.has(it.id));
       setClipboard(copied);
     },
 
@@ -701,7 +776,6 @@ export const useBoard = create<BoardState>((set, get) => {
     pasteClipboard: (at) => {
       const clip = getClipboard();
       if (!clip || clip.length === 0) return;
-      // Offset so the cluster lands near `at` (or 30px offset if none).
       let dx = 30;
       let dy = 30;
       if (at) {
@@ -716,16 +790,72 @@ export const useBoard = create<BoardState>((set, get) => {
         dy = at.y - cy;
       }
       snapshot();
+      const idMap = new Map<ItemId, ItemId>();
+      for (const it of clip) idMap.set(it.id, newId(it.type));
       const copies = clip.map((it) => ({
         ...it,
-        id: newId(it.type),
+        id: idMap.get(it.id)!,
         x: it.x + dx,
         y: it.y + dy,
         locked: false,
+        ...(it.type === "group"
+          ? { childIds: (it as GroupItem).childIds.map((c) => idMap.get(c) ?? c) }
+          : {}),
       }));
       set({
         items: [...get().items, ...copies],
         selectedIds: copies.map((c) => c.id),
+      });
+    },
+
+    groupSelected: () => {
+      const { selectedIds, items } = get();
+      // Only group concrete items (not connectors, comments, or existing groups).
+      const eligible = selectedIds.filter((id) => {
+        const it = items.find((i) => i.id === id);
+        return it && it.type !== "connector" && it.type !== "comment" && it.type !== "group";
+      });
+      if (eligible.length < 2) return;
+      const boxes = items.filter((it) => eligible.includes(it.id)).map(itemBBox);
+      const pad = 8;
+      const minX = Math.min(...boxes.map((b) => b.minX)) - pad;
+      const minY = Math.min(...boxes.map((b) => b.minY)) - pad;
+      const maxX = Math.max(...boxes.map((b) => b.maxX)) + pad;
+      const maxY = Math.max(...boxes.map((b) => b.maxY)) + pad;
+      const group: Item = {
+        id: newId("group"),
+        type: "group",
+        x: minX,
+        y: minY,
+        w: maxX - minX,
+        h: maxY - minY,
+        rotation: 0,
+        childIds: eligible,
+      };
+      snapshot();
+      useActivity.getState().log("grouped items");
+      // Groups render below their children — insert before rest.
+      const nonGroup = get().items.filter((it) => !eligible.includes(it.id) || it.type === "frame");
+      const grouped = get().items.filter((it) => eligible.includes(it.id) && it.type !== "frame");
+      set({
+        items: [group, ...nonGroup.filter((it) => !eligible.includes(it.id)), ...grouped],
+        selectedIds: [group.id],
+      });
+    },
+
+    ungroupSelected: () => {
+      const { selectedIds, items } = get();
+      const groups = items.filter(
+        (it): it is GroupItem => it.type === "group" && selectedIds.includes(it.id),
+      );
+      if (groups.length === 0) return;
+      snapshot();
+      useActivity.getState().log("ungrouped items");
+      const groupIds = new Set(groups.map((g) => g.id));
+      const childrenToSelect = groups.flatMap((g) => g.childIds);
+      set({
+        items: get().items.filter((it) => !groupIds.has(it.id)),
+        selectedIds: childrenToSelect,
       });
     },
 
@@ -764,6 +894,19 @@ export const useBoard = create<BoardState>((set, get) => {
       const items = get().items;
       if (items.length === 0) return null;
       const boxes = items.map(itemBBox);
+      return {
+        minX: Math.min(...boxes.map((b) => b.minX)),
+        minY: Math.min(...boxes.map((b) => b.minY)),
+        maxX: Math.max(...boxes.map((b) => b.maxX)),
+        maxY: Math.max(...boxes.map((b) => b.maxY)),
+      };
+    },
+
+    selectionBBox: () => {
+      const { items, selectedIds } = get();
+      const sel = items.filter((it) => selectedIds.includes(it.id));
+      if (sel.length === 0) return null;
+      const boxes = sel.map(itemBBox);
       return {
         minX: Math.min(...boxes.map((b) => b.minX)),
         minY: Math.min(...boxes.map((b) => b.minY)),

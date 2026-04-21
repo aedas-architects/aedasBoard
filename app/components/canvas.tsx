@@ -292,6 +292,174 @@ function pointNearStroke(
   return false;
 }
 
+/* -------- Connector anchor dots (shown on hover in connector mode) -------- */
+
+function ConnectorAnchors({
+  itemId,
+  zoom,
+}: {
+  itemId: string;
+  zoom: number;
+}) {
+  const item = useBoard((s) => s.items.find((it) => it.id === itemId));
+  if (!item) return null;
+  // Only show anchors on shapes that make sense as connector endpoints.
+  if (
+    item.type === "connector" ||
+    item.type === "stroke" ||
+    item.type === "comment" ||
+    item.type === "group"
+  )
+    return null;
+
+  const { x, y, w, h } = item;
+  const r = 6 / zoom;
+  const border = 1.5 / zoom;
+
+  const anchors = [
+    { key: "t", cx: x + w / 2, cy: y },
+    { key: "r", cx: x + w, cy: y + h / 2 },
+    { key: "b", cx: x + w / 2, cy: y + h },
+    { key: "l", cx: x, cy: y + h / 2 },
+    { key: "c", cx: x + w / 2, cy: y + h / 2 },
+  ];
+
+  return (
+    <>
+      {anchors.map(({ key, cx, cy }) => (
+        <span
+          key={key}
+          className="pointer-events-none absolute rounded-full"
+          style={{
+            left: cx - r,
+            top: cy - r,
+            width: r * 2,
+            height: r * 2,
+            background: "var(--accent)",
+            border: `${border}px solid white`,
+            boxShadow: `0 0 0 ${border}px var(--accent)`,
+            opacity: key === "c" ? 0.5 : 1,
+          }}
+        />
+      ))}
+    </>
+  );
+}
+
+/* -------- Multi-select bounding box + rotation handle -------- */
+
+function MultiSelectOverlay({ zoom }: { zoom: number }) {
+  const selectedIds = useBoard((s) => s.selectedIds);
+  const items = useBoard((s) => s.items);
+  const drag = useGesture((s) => s.drag);
+  const resize = useGesture((s) => s.resize);
+
+  if (selectedIds.length < 2) return null;
+  // Hide during resize gesture (individual handles take over)
+  if (resize) return null;
+
+  const selected = items.filter(
+    (it) =>
+      selectedIds.includes(it.id) &&
+      it.type !== "connector" &&
+      it.type !== "stroke" &&
+      it.type !== "comment",
+  );
+  if (selected.length < 2) return null;
+
+  const boxes = selected.map(itemBBox);
+  const minX = Math.min(...boxes.map((b) => b.minX));
+  const minY = Math.min(...boxes.map((b) => b.minY));
+  const maxX = Math.max(...boxes.map((b) => b.maxX));
+  const maxY = Math.max(...boxes.map((b) => b.maxY));
+  const w = maxX - minX;
+  const h = maxY - minY;
+  const pad = 8 / zoom;
+
+  const ROT_LINE_H = 22 / zoom;
+  const ROT_R = 6 / zoom;
+  const bw = 1.5 / zoom;
+
+  function onRotatePointerDown(e: React.PointerEvent) {
+    e.stopPropagation();
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const { pan } = useViewport.getState();
+    const { zoom: z } = useViewport.getState();
+    const screenCx = cx * z + pan.x;
+    const screenCy = cy * z + pan.y;
+    const startAngle = Math.atan2(e.clientY - screenCy, e.clientX - screenCx);
+    useGesture.getState().startRotate({
+      pointerId: e.pointerId,
+      centerWorld: { x: cx, y: cy },
+      startAngle,
+      startItems: selected.map((it) => ({
+        id: it.id,
+        rotation: it.rotation ?? 0,
+        offsetX: it.x + it.w / 2 - cx,
+        offsetY: it.y + it.h / 2 - cy,
+        w: it.w,
+        h: it.h,
+      })),
+    });
+  }
+
+  void drag; // referenced to avoid lint warning; overlay stays visible during drag
+
+  return (
+    <div
+      className="pointer-events-none absolute"
+      style={{
+        left: minX - pad,
+        top: minY - pad,
+        width: w + pad * 2,
+        height: h + pad * 2,
+      }}
+    >
+      {/* Dashed bounding box */}
+      <span
+        className="absolute inset-0"
+        style={{
+          border: `${bw}px dashed var(--accent)`,
+          borderRadius: 6 / zoom,
+          opacity: 0.7,
+        }}
+      />
+      {/* Rotation handle stem */}
+      <span
+        style={{
+          position: "absolute",
+          left: "50%",
+          top: -ROT_LINE_H,
+          width: bw,
+          height: ROT_LINE_H,
+          background: "var(--accent)",
+          transform: "translateX(-50%)",
+          opacity: 0.5,
+        }}
+      />
+      {/* Rotation handle circle */}
+      <span
+        style={{
+          position: "absolute",
+          left: "50%",
+          top: -(ROT_LINE_H + ROT_R * 2),
+          width: ROT_R * 2,
+          height: ROT_R * 2,
+          marginLeft: -ROT_R,
+          background: "white",
+          border: `${1.5 / zoom}px solid var(--accent)`,
+          borderRadius: "50%",
+          cursor: "crosshair",
+          boxShadow: `0 ${1 / zoom}px ${3 / zoom}px rgba(0,0,0,0.18)`,
+          pointerEvents: "auto",
+        }}
+        onPointerDown={onRotatePointerDown}
+      />
+    </div>
+  );
+}
+
 /* -------- Canvas -------- */
 
 export function Canvas() {
@@ -307,6 +475,7 @@ export function Canvas() {
   const pan = useViewport((s) => s.pan);
   const zoom = useViewport((s) => s.zoom);
   const gridVisible = useViewport((s) => s.gridVisible);
+  const gridStyle = useViewport((s) => s.gridStyle);
   const setPan = useViewport((s) => s.setPan);
   const panBy = useViewport((s) => s.panBy);
   const zoomAt = useViewport((s) => s.zoomAt);
@@ -360,6 +529,10 @@ export function Canvas() {
 
   const drag = useGesture((s) => s.drag);
   const resize = useGesture((s) => s.resize);
+  const rotate = useGesture((s) => s.rotate);
+  const rotateAngleDeg = useGesture((s) => s.rotateAngleDeg);
+  const [rotateChipPos, setRotateChipPos] = useState<{ x: number; y: number } | null>(null);
+  const [connectorHoverId, setConnectorHoverId] = useState<string | null>(null);
 
   /* ----- Window-level drag listener ----- */
   useEffect(() => {
@@ -545,6 +718,73 @@ export function Canvas() {
     };
   }, [resize]);
 
+  /* ----- Window-level rotate listener ----- */
+  useEffect(() => {
+    if (!rotate) return;
+    document.body.style.cursor = "crosshair";
+
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerId !== rotate.pointerId) return;
+      const { pan, zoom } = useViewport.getState();
+      const screenCx = rotate.centerWorld.x * zoom + pan.x;
+      const screenCy = rotate.centerWorld.y * zoom + pan.y;
+      const currentAngle = Math.atan2(e.clientY - screenCy, e.clientX - screenCx);
+      let deltaRad = currentAngle - rotate.startAngle;
+
+      // Shift snaps to 15° increments
+      if (e.shiftKey) {
+        const snap = Math.PI / 12; // 15°
+        deltaRad = Math.round(deltaRad / snap) * snap;
+      }
+
+      const deltaDeg = deltaRad * (180 / Math.PI);
+
+      // Compute the displayed angle from the first item's base rotation.
+      const firstItem = rotate.startItems[0];
+      if (firstItem) {
+        const raw = firstItem.rotation + deltaDeg;
+        const normalised = ((raw % 360) + 360) % 360;
+        useGesture.getState().setRotateAngleDeg(Math.round(normalised));
+      }
+      setRotateChipPos({ x: e.clientX, y: e.clientY });
+
+      useBoard.setState((s) => ({
+        items: s.items.map((it) => {
+          const si = rotate.startItems.find((r) => r.id === it.id);
+          if (!si) return it;
+          const newRotation = si.rotation + deltaDeg;
+          // For single-item rotation the center is the item center — no position change needed.
+          // For multi-item orbit: rotate item center around group center.
+          if (rotate.startItems.length === 1) {
+            return { ...it, rotation: newRotation };
+          }
+          const cosA = Math.cos(deltaRad);
+          const sinA = Math.sin(deltaRad);
+          const newOffX = si.offsetX * cosA - si.offsetY * sinA;
+          const newOffY = si.offsetX * sinA + si.offsetY * cosA;
+          return {
+            ...it,
+            rotation: newRotation,
+            x: rotate.centerWorld.x + newOffX - si.w / 2,
+            y: rotate.centerWorld.y + newOffY - si.h / 2,
+          };
+        }),
+      }));
+    };
+
+    const onUp = () => useGesture.getState().endRotate();
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      document.body.style.cursor = "";
+    };
+  }, [rotate]);
+
   const cursor = useMemo(() => {
     if (spaceHeld) return "grab";
     if (activeTool === "pen") return PEN_CURSOR;
@@ -552,6 +792,7 @@ export function Canvas() {
     if (activeTool === "eraser") return ERASER_CURSOR;
     if (activeTool === "sticky" || activeTool === "text" || activeTool === "shape")
       return "crosshair";
+    if (activeTool === "select") return "default";
     return "grab";
   }, [activeTool, spaceHeld]);
 
@@ -703,6 +944,11 @@ export function Canvas() {
           zoomTo100();
           return;
         }
+        if (e.key === "2") {
+          const bbox = useBoard.getState().selectionBBox() ?? useBoard.getState().contentBBox();
+          if (bbox) fitToBBox(bbox);
+          return;
+        }
         if (e.key === "3") {
           const bbox = useBoard.getState().contentBBox();
           if (bbox) fitToBBox(bbox);
@@ -748,6 +994,14 @@ export function Canvas() {
         const dy =
           e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
         nudgeSelected(dx, dy);
+        return;
+      }
+
+      // Cmd/Ctrl + G → group; Cmd/Ctrl + Shift + G → ungroup.
+      if ((e.metaKey || e.ctrlKey) && e.code === "KeyG") {
+        e.preventDefault();
+        if (e.shiftKey) useBoard.getState().ungroupSelected();
+        else useBoard.getState().groupSelected();
         return;
       }
 
@@ -837,23 +1091,19 @@ export function Canvas() {
 
   /* Pointer gestures:
    *  - Space / middle / right anywhere → pan
-   *  - Select tool + empty canvas + no modifier → pan (Miro default)
-   *  - Select tool + empty canvas + Shift → marquee
-   *  - Sticky / Text / Shape tools + empty canvas → place item on up (§2.3–2.5)
+   *  - hand mode (default) + empty canvas → pan
+   *  - select tool + empty canvas → rubber-band marquee
+   *  - Sticky / Text / Shape tools + empty canvas → place item on up
    */
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
-    // If a text edit is in progress, blur it by letting the click fall through
-    // normally — the contentEditable's onBlur will commit.
     const middleOrRight = e.button === 1 || e.button === 2;
+    const isHandMode = activeTool === "hand" || activeTool === "stickers";
+    const isSelectMode = activeTool === "select";
 
-    const explicitPan = spaceHeld || middleOrRight;
-    // Stickers is a passive "browsing" tool — treat it like Select so the user
-    // can still pan the canvas while the panel is open.
-    const passiveTool =
-      activeTool === "select" || activeTool === "stickers";
-    const defaultPan = passiveTool && !e.shiftKey;
+    const shouldPan = spaceHeld || middleOrRight || isHandMode;
+    const shouldMarquee = isSelectMode;
 
-    if (explicitPan || defaultPan) {
+    if (shouldPan) {
       e.currentTarget.setPointerCapture(e.pointerId);
       const { pan: p } = useViewport.getState();
       panGestureRef.current = {
@@ -867,7 +1117,7 @@ export function Canvas() {
       return;
     }
 
-    if (passiveTool && e.shiftKey) {
+    if (shouldMarquee) {
       e.currentTarget.setPointerCapture(e.pointerId);
       setMarquee({
         startX: e.clientX,
@@ -985,6 +1235,13 @@ export function Canvas() {
     }
     if (marquee) {
       setMarquee({ ...marquee, endX: e.clientX, endY: e.clientY });
+    }
+
+    // Connector tool: highlight the item under the pointer so anchor dots appear.
+    if (activeTool === "connector" && !connectorDraft) {
+      setConnectorHoverId(findItemIdAt(e.clientX, e.clientY));
+    } else if (activeTool !== "connector") {
+      if (connectorHoverId !== null) setConnectorHoverId(null);
     }
   }
 
@@ -1110,13 +1367,15 @@ export function Canvas() {
       if (dragged) {
         const hits = useBoard
           .getState()
-          .items.filter((it) => it.type !== "frame") // frames pass through
+          .items.filter((it) => it.type !== "frame" && it.type !== "group") // frames/groups excluded from marquee
           .filter((it) => rectsIntersect(itemBBox(it), rect))
           .map((it) => it.id);
 
         const existing = useBoard.getState().selectedIds;
         const next = e.shiftKey ? Array.from(new Set([...existing, ...hits])) : hits;
         useBoard.getState().setSelection(next);
+      } else if (!e.shiftKey) {
+        useBoard.getState().clearSelection();
       }
       setMarquee(null);
     }
@@ -1126,8 +1385,19 @@ export function Canvas() {
     if (!gridVisible) return { image: "none", size: "auto", position: "0 0" };
     const minor = Math.max(6, GRID_SIZE * zoom);
     const major = Math.max(30, GRID_SIZE * 5 * zoom);
-    // Keep the grid present but quiet — components should read louder than the
-    // paper underneath (Miro has a very soft grid that doesn't compete).
+
+    if (gridStyle === "dots") {
+      const dotAlpha = Math.max(0, Math.min(0.5, (zoom - 0.2) * 0.5));
+      const dot = `rgba(168, 160, 142, ${dotAlpha.toFixed(3)})`;
+      // radial-gradient dot at each grid intersection
+      const dotImg = `radial-gradient(circle, ${dot} 1px, transparent 1px)`;
+      return {
+        image: `${dotImg}, ${dotImg}`,
+        size: `${major}px ${major}px, ${minor}px ${minor}px`,
+        position: `${pan.x}px ${pan.y}px, ${pan.x}px ${pan.y}px`,
+      };
+    }
+
     const minorAlpha = Math.max(0, Math.min(0.16, (zoom - 0.35) * 0.32));
     const minorLine = `rgba(168, 160, 142, ${minorAlpha.toFixed(3)})`;
     const majorLine = "rgba(168, 160, 142, 0.16)";
@@ -1141,7 +1411,7 @@ export function Canvas() {
       size: `${major}px ${major}px, ${major}px ${major}px, ${minor}px ${minor}px, ${minor}px ${minor}px`,
       position: `${pan.x}px ${pan.y}px, ${pan.x}px ${pan.y}px, ${pan.x}px ${pan.y}px, ${pan.x}px ${pan.y}px`,
     };
-  }, [gridVisible, zoom, pan.x, pan.y]);
+  }, [gridVisible, gridStyle, zoom, pan.x, pan.y]);
 
   return (
     <div
@@ -1230,6 +1500,14 @@ export function Canvas() {
         {items.map((item) => (
           <ItemRenderer key={item.id} item={item} />
         ))}
+
+        {/* Connector anchor dots on hovered item */}
+        {connectorHoverId && (
+          <ConnectorAnchors itemId={connectorHoverId} zoom={zoom} />
+        )}
+
+        {/* Multi-select bounding box + rotation handle */}
+        <MultiSelectOverlay zoom={zoom} />
 
         {/* In-flight pen stroke (world-space, follows pan/zoom) */}
         {penDraft && penDraft.points.length >= 4 && (
@@ -1467,6 +1745,19 @@ export function Canvas() {
           />
         )}
       </AnimatePresence>
+
+      {/* Rotation angle chip (screen-space, follows pointer) */}
+      {rotate && rotateAngleDeg !== null && rotateChipPos && (
+        <div
+          className="pointer-events-none fixed z-50 rounded-md bg-ink px-2 py-0.5 text-[12px] font-mono font-medium text-white shadow-md"
+          style={{
+            left: rotateChipPos.x + 14,
+            top: rotateChipPos.y + 14,
+          }}
+        >
+          {rotateAngleDeg}°
+        </div>
+      )}
 
     </div>
   );

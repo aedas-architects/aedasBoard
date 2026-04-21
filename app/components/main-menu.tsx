@@ -27,6 +27,7 @@ import {
   Sparkles,
   Square,
   Trash2,
+  History,
   Undo2,
   ZoomIn,
   ZoomOut,
@@ -74,6 +75,7 @@ export function MainMenu({ boardId }: { boardId: string }) {
   const requestRenameTitle = useUI((s) => s.requestRenameTitle);
   const setTemplates = useUI((s) => s.setTemplates);
   const setFramesPanel = useUI((s) => s.setFramesPanel);
+  const setHistoryPanel = useUI((s) => s.setHistoryPanel);
   const setExportOpen = useUI((s) => s.setExport);
   const setCommandPalette = useUI((s) => s.setCommandPalette);
   const setSearch = useUI((s) => s.setSearch);
@@ -82,6 +84,8 @@ export function MainMenu({ boardId }: { boardId: string }) {
 
   const gridVisible = useViewport((s) => s.gridVisible);
   const toggleGrid = useViewport((s) => s.toggleGrid);
+  const gridStyle = useViewport((s) => s.gridStyle);
+  const setGridStyle = useViewport((s) => s.setGridStyle);
   const minimapVisible = useViewport((s) => s.minimapVisible);
   const toggleMinimap = useViewport((s) => s.toggleMinimap);
   const zoomStep = useViewport((s) => s.zoomStep);
@@ -150,8 +154,8 @@ export function MainMenu({ boardId }: { boardId: string }) {
     startPresenting(0);
   };
 
-  const onDuplicateBoard = () => {
-    const copy = duplicateBoard(boardId);
+  const onDuplicateBoard = async () => {
+    const copy = await duplicateBoard(boardId);
     if (copy) router.push(`/board/${copy.id}`);
   };
 
@@ -198,6 +202,13 @@ export function MainMenu({ boardId }: { boardId: string }) {
           label: "Duplicate board",
           icon: <Copy size={13} strokeWidth={1.8} />,
           onClick: run(onDuplicateBoard),
+        },
+        { kind: "divider" },
+        {
+          kind: "item",
+          label: "History",
+          icon: <History size={13} strokeWidth={1.8} />,
+          onClick: run(() => setHistoryPanel(true)),
         },
         { kind: "divider" },
         {
@@ -384,6 +395,20 @@ export function MainMenu({ boardId }: { boardId: string }) {
           label: `${gridVisible ? "Hide" : "Show"} grid`,
           icon: <Grid3X3 size={13} strokeWidth={1.8} />,
           onClick: run(toggleGrid),
+        },
+        {
+          kind: "item",
+          label: "Grid lines",
+          icon: <Grid3X3 size={13} strokeWidth={1.8} />,
+          onClick: run(() => { if (!gridVisible) toggleGrid(); setGridStyle("lines"); }),
+          disabled: gridStyle === "lines" && gridVisible,
+        },
+        {
+          kind: "item",
+          label: "Dot grid",
+          icon: <Square size={13} strokeWidth={1.8} />,
+          onClick: run(() => { if (!gridVisible) toggleGrid(); setGridStyle("dots"); }),
+          disabled: gridStyle === "dots" && gridVisible,
         },
         {
           kind: "item",

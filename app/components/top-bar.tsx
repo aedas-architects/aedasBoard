@@ -1,21 +1,16 @@
 "use client";
 
-import { Bell, MessageSquare, Play, Users } from "lucide-react";
-import { motion } from "motion/react";
+import { Bell, Check, Cloud, MessageSquare, Play, Users } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useBoard } from "../lib/board-store";
 import { useBoards } from "../lib/boards-store";
-import { useUI } from "../lib/ui-store";
+import { usePresence } from "../lib/presence-store";
+import { useUI, type SaveStatus } from "../lib/ui-store";
+import { InviteModal } from "./invite-modal";
 import { MainMenu } from "./main-menu";
 import { Wordmark } from "./wordmark";
-
-const collaborators = [
-  { initials: "KM", color: "#D94A38", name: "Karim M." },
-  { initials: "SR", color: "#2E6FDB", name: "Saanvi R." },
-  { initials: "JT", color: "#2E8B57", name: "Jonas T." },
-  { initials: "LA", color: "#C97A1F", name: "Lina A." },
-];
 
 const enterEase = [0.4, 0, 0.2, 1] as const;
 const clusterEnter = {
@@ -24,28 +19,34 @@ const clusterEnter = {
   transition: { duration: 0.28, ease: enterEase },
 };
 
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.slice(0, 2).toUpperCase();
+}
+
 function Avatar({
-  initials,
-  color,
   name,
+  color,
   delay,
 }: {
-  initials: string;
-  color: string;
   name: string;
+  color: string;
   delay: number;
 }) {
   return (
     <motion.div
+      key={name}
       initial={{ opacity: 0, scale: 0.7 }}
       animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.7 }}
       transition={{ type: "spring", stiffness: 420, damping: 28, delay }}
       whileHover={{ y: -2, scale: 1.05 }}
       className="relative -mr-2 flex h-[30px] w-[30px] items-center justify-center rounded-full border-2 border-panel shadow-[var(--shadow-sm)] text-[11px] font-semibold text-white cursor-pointer"
       style={{ background: color }}
       title={name}
     >
-      {initials}
+      {initials(name)}
     </motion.div>
   );
 }
@@ -118,11 +119,54 @@ function BoardTitle({ boardId }: { boardId: string }) {
   );
 }
 
+function SaveChip() {
+  const status = useUI((s) => s.saveStatus);
+
+  const label: Record<SaveStatus, string> = {
+    idle: "",
+    saving: "Saving…",
+    saved: "Saved",
+  };
+
+  return (
+    <AnimatePresence mode="wait">
+      {status !== "idle" && (
+        <motion.div
+          key={status}
+          initial={{ opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -6 }}
+          transition={{ duration: 0.16, ease: [0.4, 0, 0.2, 1] }}
+          className="pointer-events-none flex items-center gap-1.5 rounded-[var(--r-2xl)] border border-[var(--line)] bg-panel px-3 py-1.5 shadow-[var(--shadow-md)]"
+        >
+          {status === "saving" ? (
+            <motion.span
+              animate={{ rotate: 360 }}
+              transition={{ duration: 1.2, repeat: Infinity, ease: "linear" }}
+              className="flex"
+            >
+              <Cloud size={13} strokeWidth={1.8} className="text-muted" />
+            </motion.span>
+          ) : (
+            <Check size={13} strokeWidth={2.2} className="text-[var(--accent)]" />
+          )}
+          <span className="font-mono text-[11px] font-medium text-muted">
+            {label[status]}
+          </span>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
 export function TopBar({ boardId }: { boardId: string }) {
   const startPresenting = useUI((s) => s.startPresenting);
   const setExportOpen = useUI((s) => s.setExport);
   const items = useBoard((s) => s.items);
   const hasFrames = items.some((it) => it.type === "frame");
+  const peersRecord = usePresence((s) => s.peers);
+  const peers = Object.values(peersRecord);
+  const [inviteOpen, setInviteOpen] = useState(false);
 
   const onPresent = () => {
     if (!hasFrames) {
@@ -136,6 +180,14 @@ export function TopBar({ boardId }: { boardId: string }) {
 
   return (
     <header className="pointer-events-none absolute inset-x-0 top-0 z-40 flex items-start justify-between px-[14px] pt-[14px]">
+      {/* Center cluster — save status */}
+      <motion.div
+        {...clusterEnter}
+        className="pointer-events-none absolute left-1/2 top-[14px] -translate-x-1/2"
+      >
+        <SaveChip />
+      </motion.div>
+
       {/* Left cluster */}
       <motion.div
         {...clusterEnter}
@@ -158,17 +210,20 @@ export function TopBar({ boardId }: { boardId: string }) {
           transition={{ duration: 0.28, ease: enterEase, delay: 0.04 }}
           className="flex items-center rounded-[var(--r-2xl)] bg-panel pl-3 pr-3 py-1.5 shadow-[var(--shadow-md)] border border-[var(--line)]"
         >
-          <div className="flex items-center">
-            {collaborators.map((c, i) => (
-              <Avatar key={c.initials} {...c} delay={0.1 + i * 0.06} />
-            ))}
-          </div>
+          <AnimatePresence>
+            <div className="flex items-center">
+              {peers.map((p, i) => (
+                <Avatar key={p.userId} name={p.userName} color={p.color} delay={0.1 + i * 0.06} />
+              ))}
+            </div>
+          </AnimatePresence>
           <motion.button
             whileTap={{ scale: 0.96 }}
             className="ml-3 flex items-center gap-1.5 rounded-[var(--r-md)] px-2 py-1 text-[13px] font-medium text-ink-soft hover:bg-panel-soft"
           >
             <Users size={15} strokeWidth={1.8} />
-            <span className="hidden sm:inline">4</span>
+            {/* +1 includes the current user */}
+            <span className="hidden sm:inline">{peers.length + 1}</span>
           </motion.button>
         </motion.div>
 
@@ -219,13 +274,15 @@ export function TopBar({ boardId }: { boardId: string }) {
           transition={{ duration: 0.28, ease: enterEase, delay: 0.18 }}
           whileHover={{ y: -1 }}
           whileTap={{ scale: 0.97 }}
-          onClick={() => setExportOpen(true)}
-          title="Export board"
+          onClick={() => setInviteOpen(true)}
+          title="Invite collaborators"
           className="rounded-[var(--r-2xl)] bg-ink px-4 py-2 text-[13px] font-semibold text-[var(--panel-soft)] shadow-[var(--shadow-md)] hover:bg-[#0e0e0e]"
         >
           Share
         </motion.button>
       </div>
+
+      <InviteModal boardId={boardId} open={inviteOpen} onClose={() => setInviteOpen(false)} />
     </header>
   );
 }

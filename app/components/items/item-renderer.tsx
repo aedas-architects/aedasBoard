@@ -5,6 +5,7 @@ import { useBoard, type Item } from "../../lib/board-store";
 import { CommentPin } from "./comment-pin";
 import { Connector } from "./connector";
 import { FrameBox } from "./frame-box";
+import { GroupBox } from "./group-box";
 import { ImageView } from "./image";
 import { Shape } from "./shape";
 import { Sticky } from "./sticky";
@@ -31,23 +32,29 @@ export function ItemRenderer({ item }: { item: Item }) {
       return <CommentPin item={item} selected={selected} />;
     case "image":
       return <ImageView item={item} selected={selected} />;
+    case "group":
+      return <GroupBox item={item} selected={selected} />;
   }
 }
 
 /**
- * Frames render below everything; connectors render above stickies but below
- * comments (so comment pins always float on top).
+ * Render order: frames → groups → connectors → rest → comments.
+ * Groups sit above frames so their outline overlays correctly.
  */
 export function useSortedItems() {
   const items = useBoard((s) => s.items);
   return useMemo(() => {
     const frames = items.filter((i) => i.type === "frame");
+    const groups = items.filter((i) => i.type === "group");
     const connectors = items.filter((i) => i.type === "connector");
     const comments = items.filter((i) => i.type === "comment");
     const rest = items.filter(
       (i) =>
-        i.type !== "frame" && i.type !== "connector" && i.type !== "comment",
+        i.type !== "frame" &&
+        i.type !== "group" &&
+        i.type !== "connector" &&
+        i.type !== "comment",
     );
-    return [...frames, ...connectors, ...rest, ...comments];
+    return [...frames, ...groups, ...connectors, ...rest, ...comments];
   }, [items]);
 }

@@ -3,7 +3,7 @@
 import { Folder, LayoutGrid, MoreHorizontal, Star, User, Workflow } from "lucide-react";
 import { motion } from "motion/react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { boardItemsKey, type BoardMeta, useBoards } from "../../lib/boards-store";
 import type { Item } from "../../lib/board-store";
 
@@ -16,9 +16,9 @@ const ICONS: Record<BoardMeta["icon"], React.ComponentType<{ size?: number; stro
 
 const ICON_TINT: Record<BoardMeta["icon"], string> = {
   folder: "#c97a1f",
-  user: "#2e6fdb",
+  user: "#7C3AED",
   flow: "#d94a38",
-  grid: "#2e8b57",
+  grid: "#7C3AED",
 };
 
 function formatRelative(ts: number) {
@@ -27,8 +27,15 @@ function formatRelative(ts: number) {
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
   const days = Math.floor(diff / 86_400_000);
-  if (days === 1) return "yesterday";
+  if (days === 1) return "Yesterday";
   if (days < 7) return `${days}d ago`;
+  return new Date(ts).toLocaleDateString();
+}
+
+function formatDay(ts: number) {
+  const diff = Date.now() - ts;
+  if (diff < 86_400_000) return "Today";
+  if (diff < 172_800_000) return "Yesterday";
   return new Date(ts).toLocaleDateString();
 }
 
@@ -48,13 +55,20 @@ function ThumbnailPreview({ boardId }: { boardId: string }) {
 
   if (!items || items.length === 0) {
     return (
-      <div className="flex h-full w-full items-center justify-center">
-        <span className="font-serif italic text-[22px] text-muted">empty</span>
+      <div className="flex h-full w-full items-center justify-center bg-bg">
+        <div className="grid grid-cols-2 gap-2">
+          {[0, 1, 2, 3].map((i) => (
+            <div
+              key={i}
+              className="h-8 w-10 rounded-[6px]"
+              style={{ background: "var(--line)", opacity: 0.5 + i * 0.06 }}
+            />
+          ))}
+        </div>
       </div>
     );
   }
 
-  // Compute bounding box and scale to fit thumbnail.
   const pad = 20;
   const minX = Math.min(...items.map((i) => i.x));
   const minY = Math.min(...items.map((i) => i.y));
@@ -82,64 +96,28 @@ function ThumbnailPreview({ boardId }: { boardId: string }) {
           const y = it.y - minY;
           if (it.type === "sticky") {
             return (
-              <div
-                key={it.id}
-                className="absolute rounded-[4px]"
-                style={{
-                  left: x,
-                  top: y,
-                  width: it.w,
-                  height: it.h,
-                  background: it.color,
-                  boxShadow: "0 2px 6px rgba(0,0,0,0.08)",
-                }}
-              />
+              <div key={it.id} className="absolute rounded-[4px]"
+                style={{ left: x, top: y, width: it.w, height: it.h, background: it.color, boxShadow: "0 2px 6px rgba(0,0,0,0.08)" }} />
             );
           }
           if (it.type === "shape") {
             return (
-              <div
-                key={it.id}
-                className="absolute border-2"
-                style={{
-                  left: x,
-                  top: y,
-                  width: it.w,
-                  height: it.h,
-                  background: it.fill,
-                  borderColor: it.stroke,
-                  borderRadius: it.kind === "oval" ? "50%" : 8,
-                }}
-              />
+              <div key={it.id} className="absolute border-2"
+                style={{ left: x, top: y, width: it.w, height: it.h, background: it.fill, borderColor: it.stroke, borderRadius: it.kind === "oval" ? "50%" : 8 }} />
             );
           }
           if (it.type === "text") {
             return (
-              <div
-                key={it.id}
-                className="absolute"
-                style={{
-                  left: x,
-                  top: y,
-                  width: it.w,
-                  fontSize: it.fontSize,
-                  color: it.color ?? "var(--ink)",
-                  fontWeight: it.fontWeight ?? 500,
-                  fontStyle: it.italic ? "italic" : "normal",
-                  whiteSpace: "pre-wrap",
-                }}
-              >
+              <div key={it.id} className="absolute"
+                style={{ left: x, top: y, width: it.w, fontSize: it.fontSize, color: it.color ?? "var(--ink)", fontWeight: it.fontWeight ?? 500, fontStyle: it.italic ? "italic" : "normal", whiteSpace: "pre-wrap" }}>
                 {it.text}
               </div>
             );
           }
           if (it.type === "frame") {
             return (
-              <div
-                key={it.id}
-                className="absolute rounded-[4px] border border-[var(--line)] bg-panel"
-                style={{ left: x, top: y, width: it.w, height: it.h }}
-              />
+              <div key={it.id} className="absolute rounded-[4px] border border-[var(--line)] bg-panel"
+                style={{ left: x, top: y, width: it.w, height: it.h }} />
             );
           }
           return null;
@@ -149,12 +127,105 @@ function ThumbnailPreview({ boardId }: { boardId: string }) {
   );
 }
 
-export function BoardCard({ board }: { board: BoardMeta }) {
+function CardMenu({ boardId, boardName }: { boardId: string; boardName: string }) {
+  const deleteBoard = useBoards((s) => s.deleteBoard);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    // Use click (not mousedown) so the menu button's own click fires first.
+    document.addEventListener("click", handler);
+    return () => document.removeEventListener("click", handler);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={(e) => { e.preventDefault(); setOpen((v) => !v); }}
+        className={`flex h-7 w-7 items-center justify-center rounded-[var(--r-md)] text-muted transition-opacity hover:bg-panel-soft hover:text-ink group-hover:opacity-100 ${open ? "opacity-100" : "opacity-0"}`}
+        aria-label="More"
+      >
+        <MoreHorizontal size={14} strokeWidth={1.8} />
+      </button>
+      {open && (
+        <div
+          className="fixed z-[9999] min-w-[140px] rounded-[var(--r-lg)] border border-[var(--line)] bg-panel p-1 shadow-[var(--shadow-md)]"
+          style={{ top: ref.current ? ref.current.getBoundingClientRect().bottom + 4 : 0, right: typeof window !== "undefined" ? window.innerWidth - (ref.current?.getBoundingClientRect().right ?? 0) : 0 }}
+        >
+          <button
+            type="button"
+            onClick={(e) => { e.preventDefault(); if (confirm(`Delete "${boardName}"?`)) deleteBoard(boardId); setOpen(false); }}
+            className="w-full rounded-[var(--r-md)] px-2 py-1.5 text-left text-[13px] text-[var(--accent)] hover:bg-[var(--accent-soft)]"
+          >
+            Delete board
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function BoardCard({ board, view = "grid" }: { board: BoardMeta; view?: "grid" | "list" }) {
   const Icon = ICONS[board.icon];
   const starred = useBoards((s) => s.starred.includes(board.id));
   const toggleStar = useBoards((s) => s.toggleStar);
-  const deleteBoard = useBoards((s) => s.deleteBoard);
-  const [menuOpen, setMenuOpen] = useState(false);
+
+  const starBtn = (
+    <button
+      type="button"
+      onClick={(e) => { e.preventDefault(); toggleStar(board.id); }}
+      className="flex h-7 w-7 items-center justify-center rounded-[var(--r-md)] text-muted opacity-0 transition-opacity hover:bg-panel-soft hover:text-ink group-hover:opacity-100 data-[on=true]:opacity-100"
+      data-on={starred}
+      aria-label={starred ? "Unstar" : "Star"}
+    >
+      <Star size={13} strokeWidth={1.8} fill={starred ? "var(--accent)" : "none"} color={starred ? "var(--accent)" : "currentColor"} />
+    </button>
+  );
+
+  if (view === "list") {
+    return (
+      <motion.div
+        initial={{ opacity: 0, x: -6 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ duration: 0.16, ease: [0.4, 0, 0.2, 1] }}
+        className="group grid items-center gap-4 border-b border-[var(--line)] px-3 py-2.5 hover:bg-panel-soft"
+        style={{ gridTemplateColumns: "minmax(0,2fr) 1fr 1fr 1fr auto" }}
+      >
+        {/* Name */}
+        <Link href={`/board/${board.id}`} className="flex min-w-0 items-center gap-2.5">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center" style={{ color: ICON_TINT[board.icon] }}>
+            <Icon size={18} strokeWidth={1.6} />
+          </span>
+          <div className="min-w-0">
+            <div className="truncate text-[13px] font-semibold text-ink">{board.name}</div>
+            <div className="truncate text-[11px] text-muted">
+              Modified by Dijo Aedas, {formatDay(board.updatedAt)}
+            </div>
+          </div>
+        </Link>
+
+        {/* Online users — placeholder */}
+        <div />
+
+        {/* Last opened */}
+        <span className="text-[12.5px] text-ink-soft">{formatDay(board.updatedAt)}</span>
+
+        {/* Owner */}
+        <span className="text-[12.5px] text-ink-soft">Dijo Aedas</span>
+
+        {/* Actions */}
+        <div className="flex items-center gap-0.5">
+          {starBtn}
+          <CardMenu boardId={board.id} boardName={board.name} />
+        </div>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div
@@ -164,85 +235,26 @@ export function BoardCard({ board }: { board: BoardMeta }) {
       whileHover={{ y: -2 }}
       className="group relative flex flex-col overflow-hidden rounded-[var(--r-2xl)] border border-[var(--line)] bg-panel shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)]"
     >
-      <Link
-        href={`/board/${board.id}`}
-        className="relative block h-[140px] border-b border-[var(--line)] bg-bg"
-      >
+      <Link href={`/board/${board.id}`} className="relative block h-[140px] border-b border-[var(--line)] bg-bg">
         <ThumbnailPreview boardId={board.id} />
-      </Link>
-
-      <div className="flex items-center gap-2 px-3 py-2.5">
         <span
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--r-md)]"
-          style={{ background: `${ICON_TINT[board.icon]}1a`, color: ICON_TINT[board.icon] }}
+          className="absolute bottom-2 left-2 flex h-6 w-6 items-center justify-center"
+          style={{ color: ICON_TINT[board.icon] }}
         >
           <Icon size={16} strokeWidth={1.8} />
         </span>
+      </Link>
+
+      <div className="flex items-center gap-2 px-3 py-2.5">
         <Link href={`/board/${board.id}`} className="min-w-0 flex-1">
-          <div className="truncate text-[13.5px] font-semibold text-ink">
-            {board.name}
-          </div>
+          <div className="truncate text-[13.5px] font-semibold text-ink">{board.name}</div>
           <div className="truncate text-[11px] text-muted">
-            Opened {formatRelative(board.updatedAt)}
+            {formatDay(board.updatedAt)} by Dijo Aedas
           </div>
         </Link>
-
-        <button
-          type="button"
-          onClick={(e) => {
-            e.preventDefault();
-            toggleStar(board.id);
-          }}
-          className="flex h-7 w-7 items-center justify-center rounded-[var(--r-md)] text-muted opacity-0 transition-opacity hover:bg-panel-soft hover:text-ink group-hover:opacity-100 data-[on=true]:opacity-100"
-          data-on={starred}
-          aria-label={starred ? "Unstar" : "Star"}
-        >
-          <Star
-            size={14}
-            strokeWidth={1.8}
-            fill={starred ? "var(--accent)" : "none"}
-            color={starred ? "var(--accent)" : "currentColor"}
-          />
-        </button>
-
-        <div className="relative">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              setMenuOpen((v) => !v);
-            }}
-            className="flex h-7 w-7 items-center justify-center rounded-[var(--r-md)] text-muted opacity-0 hover:bg-panel-soft hover:text-ink group-hover:opacity-100"
-            aria-label="More"
-          >
-            <MoreHorizontal size={14} strokeWidth={1.8} />
-          </button>
-          {menuOpen && (
-            <>
-              <div
-                className="fixed inset-0 z-10"
-                onClick={(e) => {
-                  e.preventDefault();
-                  setMenuOpen(false);
-                }}
-              />
-              <div className="absolute right-0 top-[calc(100%+4px)] z-20 min-w-[140px] rounded-[var(--r-lg)] border border-[var(--line)] bg-panel p-1 shadow-[var(--shadow-md)]">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    if (confirm(`Delete “${board.name}”?`)) {
-                      deleteBoard(board.id);
-                    }
-                    setMenuOpen(false);
-                  }}
-                  className="w-full rounded-[var(--r-md)] px-2 py-1.5 text-left text-[13px] text-[var(--accent)] hover:bg-[var(--accent-soft)]"
-                >
-                  Delete board
-                </button>
-              </div>
-            </>
-          )}
+        <div className="flex items-center gap-0.5">
+          {starBtn}
+          <CardMenu boardId={board.id} boardName={board.name} />
         </div>
       </div>
     </motion.div>

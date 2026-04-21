@@ -10,9 +10,13 @@ import { ResizeHandles } from "./resize-handles";
 import { useItemDoubleClick, useItemPointerHandler } from "./selectable";
 
 function ShapeSVG({ item }: { item: ShapeItem }) {
-  const { kind, w, h, fill, stroke } = item;
+  const { kind, w, h, fill, stroke, strokeDash } = item;
   const geom = shapeGeometry(kind, w, h);
   const strokeOnly = isStrokeOnly(kind);
+  const dashArray =
+    strokeDash === "dashed" ? "8 5" :
+    strokeDash === "dotted" ? "2 4" :
+    undefined;
   const common = {
     fill: strokeOnly ? "none" : fill,
     stroke,
@@ -20,6 +24,7 @@ function ShapeSVG({ item }: { item: ShapeItem }) {
     vectorEffect: "non-scaling-stroke" as const,
     strokeLinejoin: "round" as const,
     strokeLinecap: "round" as const,
+    ...(dashArray ? { strokeDasharray: dashArray } : {}),
   };
 
   return (
@@ -91,8 +96,14 @@ export function Shape({ item, selected }: { item: ShapeItem; selected: boolean }
           style={{
             borderColor: item.stroke,
             background: item.fill,
+            borderStyle:
+              item.strokeDash === "dashed" ? "dashed" :
+              item.strokeDash === "dotted" ? "dotted" :
+              "solid",
             borderRadius:
-              item.kind === "rounded" ? "var(--r-lg)" : "var(--r-md)",
+              item.kind === "rounded"
+                ? Math.min(item.w, item.h) * 0.22
+                : 0,
           }}
         >
           <EditableText

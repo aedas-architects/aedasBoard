@@ -27,6 +27,8 @@ function itemTint(it: Item): { fill: string; stroke?: string } {
       return { fill: "#D94A38" };
     case "image":
       return { fill: "#C4BDA8", stroke: "#8a8578" };
+    case "group":
+      return { fill: "transparent", stroke: "#C4BDA8" };
   }
 }
 

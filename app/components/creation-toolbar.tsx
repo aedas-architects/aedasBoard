@@ -8,6 +8,7 @@ import {
   FileUp,
   Frame,
   GitBranch,
+  Hand,
   Highlighter,
   ImagePlus,
   KanbanSquare,
@@ -667,26 +668,29 @@ export function CreationToolbar() {
   };
 
   return (
-    <motion.aside
+    <>
+    <motion.div
       initial={{ opacity: 0, x: -16 }}
       animate={{ opacity: 1, x: 0 }}
-      transition={{ duration: 0.32, ease: [0.4, 0, 0.2, 1] }}
-      className="pointer-events-auto absolute left-[14px] top-1/2 z-30 -translate-y-1/2 flex flex-col items-center gap-0.5 rounded-[var(--r-2xl)] border border-[var(--line)] bg-panel p-1.5 shadow-[var(--shadow-md)]"
+      transition={{ duration: 0.28, ease: [0.4, 0, 0.2, 1] }}
+      className="pointer-events-auto absolute left-[14px] top-1/2 z-30 -translate-y-1/2 flex flex-col items-center gap-2"
     >
+      {/* Floating AI orb above the toolbar panel */}
       <button
         type="button"
         onClick={() => setAiOpen((v) => !v)}
         aria-label="Sidekick AI"
         aria-pressed={aiOpen}
-        className="mb-1 flex h-10 w-10 items-center justify-center rounded-full text-white shadow-[var(--shadow-sm)] transition-transform hover:scale-105"
-        style={{
-          background:
-            "linear-gradient(135deg, var(--accent) 0%, #c97a1f 100%)",
-        }}
+        className="flex h-11 w-11 items-center justify-center rounded-full text-white shadow-[var(--shadow-md)] transition-transform hover:scale-105 active:scale-95"
+        style={{ background: "linear-gradient(135deg, var(--accent) 0%, #c97a1f 100%)" }}
       >
-        <Sparkles size={16} strokeWidth={2} />
+        <Sparkles size={17} strokeWidth={2} />
       </button>
-      <span className="my-1 h-px w-7 bg-[var(--line)]" />
+
+    <motion.aside
+      initial={false}
+      className="flex flex-col items-center gap-0.5 rounded-[var(--r-2xl)] border border-[var(--line)] bg-panel p-1.5 shadow-[var(--shadow-md)]"
+    >
       {navTools.map((t) => (
         <ToolButton
           key={t.id}
@@ -724,7 +728,9 @@ export function CreationToolbar() {
           onOpenAiGenerate={() => setAiOpen(true)}
         />
       </div>
-      <AiGenerateDialog open={aiOpen} onClose={() => setAiOpen(false)} />
     </motion.aside>
+    </motion.div>
+      <AiGenerateDialog open={aiOpen} onClose={() => setAiOpen(false)} />
+    </>
   );
 }

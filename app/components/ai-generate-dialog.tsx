@@ -63,28 +63,43 @@ function remapItems(raw: unknown[]): Item[] {
   });
 }
 
+type Message = { role: "user" | "assistant"; content: string; error?: boolean };
+
+type SymbolMode = {
+  label: string;
+  hint: string;
+};
+
+const SYMBOL_MODES: SymbolMode[] = [
+  { label: "Diagram", hint: "Create a diagram of: " },
+  { label: "Document", hint: "Write a document about: " },
+  { label: "Image", hint: "Describe an image showing: " },
+  { label: "Frame", hint: "Create a frame layout for: " },
+  { label: "Mobile frame", hint: "Create a mobile screen for: " },
+  { label: "Connector", hint: "Create a flow with connectors for: " },
+  { label: "Sticky", hint: "Add sticky notes for: " },
+  { label: "Table", hint: "Create a table showing: " },
+  { label: "Flow", hint: "Design a workflow for: " },
+];
+
 export function AiGenerateDialog({ open, onClose }: Props) {
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const selectedIds = useBoard((s) => s.selectedIds);
   const hasSelection = selectedIds.length > 0;
 
-  // Simple greeting — ENV can override, otherwise fall back to email-derived name.
   const greetName =
-    (typeof process !== "undefined" &&
-      process.env.NEXT_PUBLIC_USER_NAME) ||
+    (typeof process !== "undefined" && process.env.NEXT_PUBLIC_USER_NAME) ||
     firstNameFromEmail(
-      typeof process !== "undefined"
-        ? process.env.NEXT_PUBLIC_USER_EMAIL
-        : undefined,
+      typeof process !== "undefined" ? process.env.NEXT_PUBLIC_USER_EMAIL : undefined,
     );
 
   useEffect(() => {
     if (!open) {
-      setError(null);
       setLoading(false);
       return;
     }
@@ -99,68 +114,75 @@ export function AiGenerateDialog({ open, onClose }: Props) {
     if (open) setTimeout(() => inputRef.current?.focus(), 200);
   }, [open]);
 
+  // Scroll to bottom whenever messages change.
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
+
+  // Auto-grow the textarea.
+  const autoResize = () => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  };
+
   const submit = async (overridePrompt?: string) => {
     const trimmed = (overridePrompt ?? prompt).trim();
     if (!trimmed || loading) return;
+
+    setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
+    setPrompt("");
+    if (inputRef.current) inputRef.current.style.height = "auto";
     setLoading(true);
-    setError(null);
 
     try {
       const { pan, zoom } = useViewport.getState();
       const existing = useBoard.getState().items;
+      const anchor = { x: (40 - pan.x) / zoom, y: (120 - pan.y) / zoom };
 
-      // Anchor the generated block near the top-left of the current viewport.
-      const anchor = {
-        x: (40 - pan.x) / zoom,
-        y: (120 - pan.y) / zoom,
-      };
-
-      // When the user has items selected, include their contents as context
-      // so the model can build on / critique / extend what's already there.
-      const selectedItems = existing.filter((it) =>
-        selectedIds.includes(it.id),
-      );
+      const selectedItems = existing.filter((it) => selectedIds.includes(it.id));
       const contextSuffix =
         selectedItems.length > 0
-          ? `\n\nCurrent selection (use this as context):\n${JSON.stringify(
-              selectedItems,
-              null,
-              2,
-            )}`
+          ? `\n\nCurrent selection (use this as context):\n${JSON.stringify(selectedItems, null, 2)}`
           : "";
 
       const res = await fetch("/api/ai/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: trimmed + contextSuffix,
-          anchor,
-          existingCount: existing.length,
-        }),
+        body: JSON.stringify({ prompt: trimmed + contextSuffix, anchor, existingCount: existing.length }),
       });
 
       const data = (await res.json()) as { items?: unknown[]; error?: string };
-      if (!res.ok) {
-        throw new Error(data.error ?? `Request failed (${res.status})`);
-      }
-      if (!Array.isArray(data.items) || data.items.length === 0) {
+      if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
+      if (!Array.isArray(data.items) || data.items.length === 0)
         throw new Error("The model didn't return any items.");
-      }
 
       const items = remapItems(data.items);
-      if (items.length === 0) {
-        throw new Error("None of the returned items were valid.");
-      }
+      if (items.length === 0) throw new Error("None of the returned items were valid.");
 
       const { addItem, setSelection } = useBoard.getState();
       for (const item of items) addItem(item);
       setSelection(items.map((it) => it.id));
-      setPrompt("");
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: `Generated ${items.length} item${items.length > 1 ? "s" : ""} on the canvas.` },
+      ]);
     } catch (err) {
-      setError((err as Error).message);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: (err as Error).message, error: true },
+      ]);
     } finally {
       setLoading(false);
     }
+  };
+
+  const applySymbolMode = (hint: string) => {
+    const next = prompt.startsWith(hint) ? prompt : hint + prompt;
+    setPrompt(next);
+    inputRef.current?.focus();
+    setTimeout(autoResize, 0);
   };
 
   // The toolbar parent has a CSS transform, which makes `position: fixed`
@@ -226,56 +248,85 @@ export function AiGenerateDialog({ open, onClose }: Props) {
           </div>
 
           {/* Body */}
-          <div className="flex-1 overflow-y-auto px-4 pb-3 pt-8">
-            <div
-              className="mb-3 flex h-8 w-8 items-center justify-center rounded-full text-white shadow-[var(--shadow-sm)]"
-              style={{
-                background:
-                  "linear-gradient(135deg, var(--accent) 0%, #c97a1f 100%)",
-              }}
-            >
-              <Sparkles size={16} strokeWidth={1.8} />
-            </div>
-
-            <h2 className="font-serif text-[32px] italic leading-[1.05] text-ink">
-              Hello {greetName}
-            </h2>
-            <p className="mt-3 text-[13px] leading-[1.55] text-ink-soft">
-              I'm here to collaborate and help you think through problems,
-              create content, and get things done using your canvas as the
-              prompt.
-            </p>
-
-            <p className="mt-5 font-serif text-[15px] italic text-ink">
-              I can help:
-            </p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {SUGGESTIONS.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  disabled={loading}
-                  onClick={() => {
-                    setPrompt(s);
-                    void submit(s);
-                  }}
-                  className="rounded-full border border-[var(--line)] bg-panel px-3 py-1.5 text-[12.5px] text-ink hover:bg-panel-soft disabled:opacity-60"
+          <div className="flex-1 overflow-y-auto px-4 pb-3 pt-6">
+            {messages.length === 0 ? (
+              <>
+                <div
+                  className="mb-3 flex h-8 w-8 items-center justify-center rounded-full text-white shadow-[var(--shadow-sm)]"
+                  style={{ background: "linear-gradient(135deg, var(--accent) 0%, #c97a1f 100%)" }}
                 >
-                  {s}
-                </button>
-              ))}
-            </div>
-
-            {error && (
-              <div className="mt-5 rounded-[var(--r-md)] border border-[var(--accent)] bg-[var(--accent-soft)] px-2.5 py-2 text-[12px] text-[var(--accent)]">
-                {error}
-              </div>
-            )}
-
-            {loading && (
-              <div className="mt-5 flex items-center gap-2 text-[12.5px] text-muted">
-                <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--accent)]" />
-                Generating…
+                  <Sparkles size={16} strokeWidth={1.8} />
+                </div>
+                <h2 className="font-serif text-[32px] italic leading-[1.05] text-ink">
+                  Hello {greetName}
+                </h2>
+                <p className="mt-3 text-[13px] leading-[1.55] text-ink-soft">
+                  I'm here to collaborate and help you think through problems, create content, and get things done using your canvas as the prompt.
+                </p>
+                <p className="mt-5 font-serif text-[15px] italic text-ink">I can help:</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {SUGGESTIONS.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      disabled={loading}
+                      onClick={() => void submit(s)}
+                      className="rounded-full border border-[var(--line)] bg-panel px-3 py-1.5 text-[12.5px] text-ink hover:bg-panel-soft disabled:opacity-60"
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {messages.map((msg, i) =>
+                  msg.role === "user" ? (
+                    <div key={i} className="flex justify-end">
+                      <div className="max-w-[80%] rounded-[var(--r-lg)] rounded-br-sm bg-ink px-3 py-2 text-[13px] leading-snug text-white">
+                        {msg.content}
+                      </div>
+                    </div>
+                  ) : (
+                    <div key={i} className="flex items-start gap-2">
+                      <div
+                        className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-white"
+                        style={{ background: "linear-gradient(135deg, var(--accent) 0%, #c97a1f 100%)" }}
+                      >
+                        <Sparkles size={11} strokeWidth={1.8} />
+                      </div>
+                      <div
+                        className={`max-w-[80%] rounded-[var(--r-lg)] rounded-bl-sm px-3 py-2 text-[13px] leading-snug ${
+                          msg.error
+                            ? "border border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
+                            : "bg-panel-soft text-ink"
+                        }`}
+                      >
+                        {msg.content}
+                      </div>
+                    </div>
+                  ),
+                )}
+                {loading && (
+                  <div className="flex items-start gap-2">
+                    <div
+                      className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-white"
+                      style={{ background: "linear-gradient(135deg, var(--accent) 0%, #c97a1f 100%)" }}
+                    >
+                      <Sparkles size={11} strokeWidth={1.8} />
+                    </div>
+                    <div className="flex items-center gap-1.5 rounded-[var(--r-lg)] rounded-bl-sm bg-panel-soft px-3 py-2.5">
+                      {[0, 1, 2].map((i) => (
+                        <span
+                          key={i}
+                          className="h-1.5 w-1.5 rounded-full bg-muted"
+                          style={{ animation: `pulse 1.2s ease-in-out ${i * 0.2}s infinite` }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
               </div>
             )}
           </div>
@@ -304,53 +355,34 @@ export function AiGenerateDialog({ open, onClose }: Props) {
               <textarea
                 ref={inputRef}
                 value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
+                onChange={(e) => { setPrompt(e.target.value); autoResize(); }}
                 onKeyDown={(e) => {
-                  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") void submit();
+                  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void submit(); }
                 }}
                 placeholder="What are you working on?"
                 rows={1}
                 disabled={loading}
                 className="no-focus-ring block w-full resize-none bg-transparent px-3 py-2.5 text-[13px] text-ink placeholder:text-muted disabled:opacity-60"
-                style={{ outline: "none", minHeight: 40, maxHeight: 160 }}
+                style={{ outline: "none", minHeight: 40, maxHeight: 160, overflowY: "hidden" }}
               />
 
               <div className="flex items-center gap-0.5 border-t border-[var(--line)] px-1.5 py-1.5">
-                <ToolbarIconButton label="Search the web">
+                <ToolbarIconButton label="Search the web" onClick={() => applySymbolMode("Search the web for: ")}>
                   <Globe size={13} strokeWidth={1.8} />
-                  <ChevronDown
-                    size={10}
-                    strokeWidth={1.8}
-                    className="text-muted"
-                  />
+                  <ChevronDown size={10} strokeWidth={1.8} className="text-muted" />
                 </ToolbarIconButton>
-                <ToolbarIconButton label="Diagram">
-                  <Workflow size={13} strokeWidth={1.8} />
-                </ToolbarIconButton>
-                <ToolbarIconButton label="Document">
-                  <TypeIcon size={13} strokeWidth={1.8} />
-                </ToolbarIconButton>
-                <ToolbarIconButton label="Image">
-                  <ImageIcon size={13} strokeWidth={1.8} />
-                </ToolbarIconButton>
-                <ToolbarIconButton label="Frame">
-                  <span className="inline-block h-3 w-3 rounded-[2px] border border-current" />
-                </ToolbarIconButton>
-                <ToolbarIconButton label="Mobile frame">
-                  <span className="inline-block h-3 w-2 rounded-[2px] border border-current" />
-                </ToolbarIconButton>
-                <ToolbarIconButton label="Connector">
-                  <span className="inline-block h-[1px] w-3 bg-current" />
-                </ToolbarIconButton>
-                <ToolbarIconButton label="Sticky">
-                  <span className="inline-block h-3 w-3 rounded-[2px] border border-current" />
-                </ToolbarIconButton>
-                <ToolbarIconButton label="Table">
-                  <TableIcon size={13} strokeWidth={1.8} />
-                </ToolbarIconButton>
-                <ToolbarIconButton label="Flow">
-                  <Workflow size={13} strokeWidth={1.8} />
-                </ToolbarIconButton>
+                {SYMBOL_MODES.map((m) => (
+                  <ToolbarIconButton key={m.label} label={m.label} onClick={() => applySymbolMode(m.hint)}>
+                    {m.label === "Diagram" || m.label === "Flow" ? <Workflow size={13} strokeWidth={1.8} /> :
+                     m.label === "Document" ? <TypeIcon size={13} strokeWidth={1.8} /> :
+                     m.label === "Image" ? <ImageIcon size={13} strokeWidth={1.8} /> :
+                     m.label === "Table" ? <TableIcon size={13} strokeWidth={1.8} /> :
+                     m.label === "Frame" ? <span className="inline-block h-3 w-3 rounded-[2px] border border-current" /> :
+                     m.label === "Mobile frame" ? <span className="inline-block h-3 w-2 rounded-[2px] border border-current" /> :
+                     m.label === "Connector" ? <span className="inline-block h-[1px] w-3 bg-current" /> :
+                     <span className="inline-block h-3 w-3 rounded-[2px] border border-current" />}
+                  </ToolbarIconButton>
+                ))}
                 <div className="flex-1" />
                 <button
                   type="button"
@@ -375,9 +407,11 @@ export function AiGenerateDialog({ open, onClose }: Props) {
 
 function ToolbarIconButton({
   label,
+  onClick,
   children,
 }: {
   label: string;
+  onClick?: () => void;
   children: React.ReactNode;
 }) {
   return (
@@ -385,6 +419,7 @@ function ToolbarIconButton({
       type="button"
       aria-label={label}
       title={label}
+      onClick={onClick}
       className="flex items-center gap-0.5 rounded-[var(--r-md)] p-1.5 text-ink-soft hover:bg-panel-soft"
     >
       {children}

@@ -1,9 +1,17 @@
 "use client";
 
 import type React from "react";
-import { itemBBox, rectsIntersect, useBoard, type Item, type ItemId } from "../../lib/board-store";
+import { itemBBox, rectsIntersect, useBoard, type GroupItem, type Item, type ItemId } from "../../lib/board-store";
 import { useGesture } from "../../lib/gesture-store";
 import { useTool } from "../../lib/tool-store";
+
+/** Return the GroupItem that contains this itemId, if any. */
+function findGroupOf(itemId: ItemId, items: Item[]): GroupItem | null {
+  for (const it of items) {
+    if (it.type === "group" && it.childIds.includes(itemId)) return it;
+  }
+  return null;
+}
 
 /** Build drag targets for every item in `ids`. Connector targets carry their
  *  endpoint snapshot so the drag handler can translate the line itself. */
@@ -56,6 +64,17 @@ function expandWithFrameChildren(
   return [...out];
 }
 
+/** For every selected group, pull in its childIds so they move together. */
+function expandWithGroupChildren(selectedIds: string[], items: Item[]): string[] {
+  const out = new Set(selectedIds);
+  for (const it of items) {
+    if (it.type === "group" && selectedIds.includes(it.id)) {
+      for (const cid of it.childIds) out.add(cid);
+    }
+  }
+  return [...out];
+}
+
 export function useItemPointerHandler(id: ItemId) {
   return (e: React.PointerEvent<HTMLElement>) => {
     const { spaceHeld, setActive, active } = useTool.getState();
@@ -83,20 +102,26 @@ export function useItemPointerHandler(id: ItemId) {
     // handle the gesture by NOT stopping propagation.
     if (active === "eraser" || active === "connector") return;
 
-    // Frames are containers — only the Select tool interacts with them. For
-    // every other tool (sticky, text, shape, pen, highlighter, etc.) let the
-    // event fall through so the tool can create inside the frame.
+    // Frames are containers — only select/hand modes interact with them.
+    // Creation tools (sticky, text, shape, pen, etc.) fall through to place inside.
     const item = items.find((it) => it.id === id);
-    if (item?.type === "frame" && active !== "select") return;
+    const isNavigationMode = active === "select" || active === "hand";
+    if (item?.type === "frame" && !isNavigationMode) return;
 
     e.stopPropagation();
-    if (active !== "select") setActive("select");
+    // In hand mode, select the item but stay in hand mode — don't switch tool.
+    if (active !== "select" && active !== "hand") setActive("select");
 
-    // Select the clicked item (or toggle it with Shift). If it's already
-    // selected and we're starting an Alt-drag, keep the whole selection.
+    // If this item belongs to a group, redirect selection to the group —
+    // unless the group is already selected (meaning we're drilling in).
+    const additive = e.shiftKey || e.metaKey || e.ctrlKey;
     const prevSelected = useBoard.getState().selectedIds;
-    if (!(e.altKey && prevSelected.includes(id))) {
-      useBoard.getState().select(id, e.shiftKey);
+    const group = findGroupOf(id, useBoard.getState().items);
+    const effectiveId =
+      group && !prevSelected.includes(group.id) ? group.id : id;
+
+    if (!(e.altKey && prevSelected.includes(effectiveId))) {
+      useBoard.getState().select(effectiveId, additive);
     }
 
     // Alt / Option held → duplicate in place, drag the copies instead.
@@ -109,8 +134,9 @@ export function useItemPointerHandler(id: ItemId) {
     useBoard.getState().bringToFront();
 
     const fresh = useBoard.getState();
-    const withChildren = expandWithFrameChildren(fresh.selectedIds, fresh.items);
-    const targets = buildDragTargets(withChildren, fresh.items);
+    const withFrameChildren = expandWithFrameChildren(fresh.selectedIds, fresh.items);
+    const withGroupChildren = expandWithGroupChildren(withFrameChildren, fresh.items);
+    const targets = buildDragTargets(withGroupChildren, fresh.items);
     if (targets.length === 0) return;
 
     useGesture.getState().startDrag({

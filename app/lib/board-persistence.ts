@@ -2,8 +2,9 @@
 
 import { useEffect, useRef } from "react";
 import { newId, useBoard, type Item } from "./board-store";
-import { boardItemsKey, useBoards } from "./boards-store";
-
+import { useBoards } from "./boards-store";
+import { useSnapshots } from "./snapshot-store";
+import { useUI } from "./ui-store";
 /** Reassign any duplicate ids we read from storage. Keeps connector endpoints
  *  (item references) pointing at the newly-assigned ids. */
 function dedupeIds(items: Item[]): Item[] {
@@ -32,33 +33,48 @@ function dedupeIds(items: Item[]): Item[] {
   });
 }
 
-type Persisted = {
-  items: Item[];
-};
+// ---------------------------------------------------------------------------
+// API helpers — auth is session-cookie based, no manual headers needed
+// ---------------------------------------------------------------------------
 
-function readBoard(id: string): Persisted | null {
+async function fetchBoardItems(id: string): Promise<Item[] | null> {
   try {
-    const raw = localStorage.getItem(boardItemsKey(id));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Persisted;
-    if (!Array.isArray(parsed.items)) return null;
-    return parsed;
+    const res = await fetch(`/api/boards/${id}`);
+    if (!res.ok) return null;
+    const doc = await res.json() as { items: Item[] };
+    return Array.isArray(doc.items) ? doc.items : null;
   } catch {
     return null;
   }
 }
 
-function writeBoard(id: string, data: Persisted) {
-  try {
-    localStorage.setItem(boardItemsKey(id), JSON.stringify(data));
-  } catch {
-    /* quota or serialization — non-fatal */
-  }
+let _saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function saveBoard(id: string, items: Item[]) {
+  useUI.getState().setSaveStatus("saving");
+
+  if (_saveTimer) clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(async () => {
+    try {
+      await fetch(`/api/boards/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items }),
+      });
+      useBoards.getState().touchBoard(id);
+      useUI.getState().setSaveStatus("saved");
+      setTimeout(() => useUI.getState().setSaveStatus("idle"), 3000);
+    } catch {
+      useUI.getState().setSaveStatus("idle");
+    }
+  }, 300);
 }
 
+const AUTO_SNAPSHOT_INTERVAL = 5 * 60 * 1000;
+
 /**
- * Hydrate `useBoard` from localStorage for the given board id, and persist
- * items back whenever they change. Call once per board page mount.
+ * Hydrate `useBoard` from Cosmos DB for the given board id, and persist
+ * items back whenever they change.
  */
 export function useBoardPersistence(id: string) {
   const hydratedRef = useRef<string | null>(null);
@@ -67,22 +83,30 @@ export function useBoardPersistence(id: string) {
     if (hydratedRef.current === id) return;
     hydratedRef.current = id;
 
-    const saved = readBoard(id);
-    useBoard.setState({
-      items: saved?.items ? dedupeIds(saved.items) : [],
-      selectedIds: [],
-      editingId: null,
+    useSnapshots.getState().clearSnapshots();
+
+    fetchBoardItems(id).then((items) => {
+      const initialItems = items ? dedupeIds(items) : [];
+      useBoard.setState({ items: initialItems, selectedIds: [], editingId: null });
+
+      if (initialItems.length > 0) {
+        useSnapshots.getState().takeSnapshot(initialItems, "Session start");
+      }
     });
 
-    // Subscribe to items changes and write-through.
+    let lastSnapshotAt = Date.now();
+
     const unsub = useBoard.subscribe((state, prev) => {
       if (state.items === prev.items) return;
-      writeBoard(id, { items: state.items });
-      useBoards.getState().touchBoard(id);
+      saveBoard(id, state.items);
+
+      const now = Date.now();
+      if (now - lastSnapshotAt >= AUTO_SNAPSHOT_INTERVAL) {
+        lastSnapshotAt = now;
+        useSnapshots.getState().takeSnapshot(state.items);
+      }
     });
 
-    return () => {
-      unsub();
-    };
+    return () => { unsub(); };
   }, [id]);
 }

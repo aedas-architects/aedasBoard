@@ -8,6 +8,7 @@ type ViewportState = {
   pan: Point;
   zoom: number;
   gridVisible: boolean;
+  gridStyle: "lines" | "dots";
   minimapVisible: boolean;
 
   setPan: (pan: Point) => void;
@@ -27,6 +28,7 @@ type ViewportState = {
   fitToBBox: (bbox: BBox) => void;
 
   toggleGrid: () => void;
+  setGridStyle: (style: "lines" | "dots") => void;
   toggleMinimap: () => void;
 };
 
@@ -34,6 +36,7 @@ export const useViewport = create<ViewportState>((set, get) => ({
   pan: { x: 0, y: 0 },
   zoom: 1,
   gridVisible: true,
+  gridStyle: "lines",
   minimapVisible: false,
 
   setPan: (pan) => set({ pan }),
@@ -84,5 +87,6 @@ export const useViewport = create<ViewportState>((set, get) => ({
   },
 
   toggleGrid: () => set({ gridVisible: !get().gridVisible }),
+  setGridStyle: (gridStyle) => set({ gridStyle }),
   toggleMinimap: () => set({ minimapVisible: !get().minimapVisible }),
 }));

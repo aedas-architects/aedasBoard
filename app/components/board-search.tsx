@@ -32,6 +32,8 @@ function labelOf(type: Item["type"]) {
       return "Stroke";
     case "image":
       return "Image";
+    case "group":
+      return "Group";
   }
 }
 
@@ -50,6 +52,7 @@ function textOf(item: Item): string {
     case "image":
       return item.alt ?? "";
     case "stroke":
+    case "group":
       return "";
   }
 }
