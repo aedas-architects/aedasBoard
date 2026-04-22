@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 
-export type SaveStatus = "idle" | "saving" | "saved";
+export type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 type UIState = {
   commandPaletteOpen: boolean;

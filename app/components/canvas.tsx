@@ -16,6 +16,8 @@ import { RESIZE_CURSOR, useGesture, type ResizeHandle } from "../lib/gesture-sto
 import { TOOL_SHORTCUTS, type Tool, useTool } from "../lib/tool-store";
 import { useUI } from "../lib/ui-store";
 import { useViewport } from "../lib/viewport-store";
+import { broadcastCursor } from "../lib/collab-bridge";
+import { PeerCursors } from "./peer-cursors";
 import { AlignBar } from "./align-bar";
 import { ConnectorPicker } from "./connector-picker";
 import { ContextMenu, type ContextTarget } from "./context-menu";
@@ -539,12 +541,11 @@ export function Canvas() {
     if (!drag) return;
     document.body.style.cursor = "grabbing";
 
-    // Once the user actually starts moving, bring the dragged items to the
-    // front of items[] so they render above everything else in their layer
-    // (Miro behavior). Do this lazily so a plain click-without-drag doesn't
-    // mutate z-order.
-    let broughtToFront = false;
-    const MOVE_THRESHOLD = 2;
+    // Note: we do NOT mutate items[] to raise the dragged items here.
+    // `useSortedItems` visually lifts them within their render layer while
+    // `useGesture.drag` is set, and returns them to their stored z-order on
+    // drop. Mutating items[] would clobber explicit Send-to-back / Bring-to-
+    // front commands the moment the user drags the shape.
 
     // Combined bbox of all dragging rect items at their pre-drag positions.
     // Connectors / strokes are excluded — they shouldn't drive snap.
@@ -583,21 +584,6 @@ export function Canvas() {
       const { zoom } = useViewport.getState();
       const rawDx = (e.clientX - drag.clientStart.x) / zoom;
       const rawDy = (e.clientY - drag.clientStart.y) / zoom;
-
-      // First real move → reorder so dragged items end up at the end of
-      // items[], which puts them visually on top within every layer group.
-      if (
-        !broughtToFront &&
-        (Math.abs(rawDx) > MOVE_THRESHOLD || Math.abs(rawDy) > MOVE_THRESHOLD)
-      ) {
-        broughtToFront = true;
-        useBoard.setState((s) => {
-          const moving = s.items.filter((it) => movingIds.has(it.id));
-          if (moving.length === 0) return s;
-          const rest = s.items.filter((it) => !movingIds.has(it.id));
-          return { items: [...rest, ...moving] };
-        });
-      }
 
       // Smart snap — align moving bbox edges / centers with static siblings.
       let dx = rawDx;
@@ -1201,6 +1187,12 @@ export function Canvas() {
   }
 
   function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    // Broadcast cursor position to peers (throttled inside the bridge).
+    {
+      const { pan: p, zoom: z } = useViewport.getState();
+      const w = screenToWorld({ x: e.clientX, y: e.clientY }, p, z);
+      broadcastCursor(w.x, w.y);
+    }
     const g = panGestureRef.current;
     if (g && g.pointerId === e.pointerId) {
       setPan({
@@ -1758,6 +1750,9 @@ export function Canvas() {
           {rotateAngleDeg}°
         </div>
       )}
+
+      {/* Remote peer cursors (screen-space, follow pan/zoom) */}
+      <PeerCursors />
 
     </div>
   );

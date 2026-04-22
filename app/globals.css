@@ -85,16 +85,19 @@ body {
   font-weight: 500;
 }
 
-/* Warm focus ring for keyboard users */
-:where(button, [role="button"], a, input, textarea):focus-visible {
+/* Warm focus ring for keyboard users — only for interactive non-text elements.
+ * Text inputs / textareas are expected to indicate focus via their own
+ * container styling (border color, background), which is quieter visually.
+ */
+:where(button, [role="button"], a):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-
-/* Inputs that opt out of the focus ring (explicitly styled containers). */
-input.no-focus-ring:focus-visible,
-input.no-focus-ring:focus {
-  outline: none !important;
+input:focus,
+input:focus-visible,
+textarea:focus,
+textarea:focus-visible {
+  outline: none;
 }
 
 /* Utility: the pale grid canvas background */

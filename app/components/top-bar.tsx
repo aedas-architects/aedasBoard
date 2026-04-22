@@ -1,12 +1,14 @@
 "use client";
 
-import { Bell, Check, Cloud, MessageSquare, Play, Users } from "lucide-react";
+import { Bell, Check, Cloud, MessageSquare, Play } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useBoard } from "../lib/board-store";
 import { useBoards } from "../lib/boards-store";
-import { usePresence } from "../lib/presence-store";
+import { useChat } from "../lib/chat-store";
+import { getPeerColor, usePresence } from "../lib/presence-store";
 import { useUI, type SaveStatus } from "../lib/ui-store";
 import { InviteModal } from "./invite-modal";
 import { MainMenu } from "./main-menu";
@@ -126,6 +128,7 @@ function SaveChip() {
     idle: "",
     saving: "Saving…",
     saved: "Saved",
+    error: "Save failed",
   };
 
   return (
@@ -147,15 +150,46 @@ function SaveChip() {
             >
               <Cloud size={13} strokeWidth={1.8} className="text-muted" />
             </motion.span>
+          ) : status === "error" ? (
+            <span className="text-red-500">✕</span>
           ) : (
             <Check size={13} strokeWidth={2.2} className="text-[var(--accent)]" />
           )}
-          <span className="font-mono text-[11px] font-medium text-muted">
+          <span className={`font-mono text-[11px] font-medium ${status === "error" ? "text-red-500" : "text-muted"}`}>
             {label[status]}
           </span>
         </motion.div>
       )}
     </AnimatePresence>
+  );
+}
+
+function ChatButton() {
+  const open = useChat((s) => s.open);
+  const unread = useChat((s) => s.unread);
+  const toggleOpen = useChat((s) => s.toggleOpen);
+
+  return (
+    <motion.button
+      whileTap={{ scale: 0.92 }}
+      onClick={toggleOpen}
+      aria-pressed={open}
+      className={`relative flex h-8 w-8 items-center justify-center rounded-[var(--r-md)] transition-colors ${
+        open ? "bg-ink text-white" : "text-ink-soft hover:bg-panel-soft"
+      }`}
+      title="Chat"
+    >
+      <MessageSquare size={16} strokeWidth={1.8} />
+      {unread > 0 && !open && (
+        <motion.span
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
+          className="absolute -top-0.5 -right-0.5 flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-accent px-1 font-mono text-[9px] font-semibold text-white"
+        >
+          {unread > 9 ? "9+" : unread}
+        </motion.span>
+      )}
+    </motion.button>
   );
 }
 
@@ -167,6 +201,12 @@ export function TopBar({ boardId }: { boardId: string }) {
   const peersRecord = usePresence((s) => s.peers);
   const peers = Object.values(peersRecord);
   const [inviteOpen, setInviteOpen] = useState(false);
+
+  // Current user — shown first in the avatar stack (Miro-style).
+  const { data: session } = useSession();
+  const selfName = session?.user?.name ?? session?.user?.email ?? "You";
+  const selfId = session?.user?.id ?? "self";
+  const selfColor = getPeerColor(selfId);
 
   const onPresent = () => {
     if (!hasFrames) {
@@ -211,20 +251,14 @@ export function TopBar({ boardId }: { boardId: string }) {
           className="flex items-center rounded-[var(--r-2xl)] bg-panel pl-3 pr-3 py-1.5 shadow-[var(--shadow-md)] border border-[var(--line)]"
         >
           <AnimatePresence>
-            <div className="flex items-center">
+            <div className="flex items-center pr-2">
+              {/* Current user first so the stack reads left-to-right as "you + others". */}
+              <Avatar name={selfName} color={selfColor} delay={0.1} />
               {peers.map((p, i) => (
-                <Avatar key={p.userId} name={p.userName} color={p.color} delay={0.1 + i * 0.06} />
+                <Avatar key={p.userId} name={p.userName} color={p.color} delay={0.1 + (i + 1) * 0.06} />
               ))}
             </div>
           </AnimatePresence>
-          <motion.button
-            whileTap={{ scale: 0.96 }}
-            className="ml-3 flex items-center gap-1.5 rounded-[var(--r-md)] px-2 py-1 text-[13px] font-medium text-ink-soft hover:bg-panel-soft"
-          >
-            <Users size={15} strokeWidth={1.8} />
-            {/* +1 includes the current user */}
-            <span className="hidden sm:inline">{peers.length + 1}</span>
-          </motion.button>
         </motion.div>
 
         <motion.div
@@ -233,13 +267,7 @@ export function TopBar({ boardId }: { boardId: string }) {
           transition={{ duration: 0.28, ease: enterEase, delay: 0.1 }}
           className="flex items-center gap-1 rounded-[var(--r-2xl)] bg-panel p-1 shadow-[var(--shadow-md)] border border-[var(--line)]"
         >
-          <motion.button
-            whileTap={{ scale: 0.92 }}
-            className="flex h-8 w-8 items-center justify-center rounded-[var(--r-md)] text-ink-soft hover:bg-panel-soft"
-            title="Chat"
-          >
-            <MessageSquare size={16} strokeWidth={1.8} />
-          </motion.button>
+          <ChatButton />
           <motion.button
             whileTap={{ scale: 0.92 }}
             className="relative flex h-8 w-8 items-center justify-center rounded-[var(--r-md)] text-ink-soft hover:bg-panel-soft"

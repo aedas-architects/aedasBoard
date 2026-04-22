@@ -4,7 +4,7 @@ export function Wordmark({ size = 22 }: { size?: number }) {
       className="inline-flex items-baseline font-serif italic leading-none tracking-tight text-ink select-none"
       style={{ fontSize: size }}
     >
-      aedas
+      Aedas Studio
       <span
         className="text-accent not-italic font-sans"
         style={{

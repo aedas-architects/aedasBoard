@@ -1,11 +1,13 @@
 "use client";
 
-import { Folder, LayoutGrid, MoreHorizontal, Star, User, Workflow } from "lucide-react";
+import { Check, Folder, FolderInput, LayoutGrid, MoreHorizontal, Star, User, Workflow } from "lucide-react";
 import { motion } from "motion/react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { boardItemsKey, type BoardMeta, useBoards } from "../../lib/boards-store";
 import type { Item } from "../../lib/board-store";
+import { useSpaces } from "../../lib/spaces-store";
 
 const ICONS: Record<BoardMeta["icon"], React.ComponentType<{ size?: number; strokeWidth?: number }>> = {
   folder: Folder,
@@ -129,34 +131,113 @@ function ThumbnailPreview({ boardId }: { boardId: string }) {
 
 function CardMenu({ boardId, boardName }: { boardId: string; boardName: string }) {
   const deleteBoard = useBoards((s) => s.deleteBoard);
+  const spaces = useSpaces((s) => s.spaces);
+  const currentSpaceId = useSpaces((s) => s.boardSpace[boardId]);
+  const setBoardSpace = useSpaces((s) => s.setBoardSpace);
   const [open, setOpen] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
+    // mousedown beats click — fires before click bubbles through a zoomed ancestor.
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (
+        (ref.current && ref.current.contains(t)) ||
+        (menuRef.current && menuRef.current.contains(t))
+      ) {
+        return;
+      }
+      setOpen(false);
+      setMoveOpen(false);
     };
-    // Use click (not mousedown) so the menu button's own click fires first.
-    document.addEventListener("click", handler);
-    return () => document.removeEventListener("click", handler);
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
   }, [open]);
+
+  const toggle = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (open) {
+      setOpen(false);
+      setMoveOpen(false);
+      return;
+    }
+    // Anchor the menu below the trigger using fixed positioning (survives
+    // parent `overflow-hidden` and the page-level `zoom` scale).
+    const r = ref.current?.getBoundingClientRect();
+    if (r) setPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
+    setOpen(true);
+  };
 
   return (
     <div ref={ref} className="relative">
       <button
         type="button"
-        onClick={(e) => { e.preventDefault(); setOpen((v) => !v); }}
-        className={`flex h-7 w-7 items-center justify-center rounded-[var(--r-md)] text-muted transition-opacity hover:bg-panel-soft hover:text-ink group-hover:opacity-100 ${open ? "opacity-100" : "opacity-0"}`}
+        onClick={toggle}
+        className={`flex h-7 w-7 items-center justify-center rounded-[var(--r-md)] transition-colors ${
+          open
+            ? "bg-panel-soft text-ink"
+            : "text-muted hover:bg-panel-soft hover:text-ink"
+        }`}
         aria-label="More"
+        aria-expanded={open}
       >
         <MoreHorizontal size={14} strokeWidth={1.8} />
       </button>
-      {open && (
+      {open && pos && typeof document !== "undefined" && createPortal(
         <div
-          className="fixed z-[9999] min-w-[140px] rounded-[var(--r-lg)] border border-[var(--line)] bg-panel p-1 shadow-[var(--shadow-md)]"
-          style={{ top: ref.current ? ref.current.getBoundingClientRect().bottom + 4 : 0, right: typeof window !== "undefined" ? window.innerWidth - (ref.current?.getBoundingClientRect().right ?? 0) : 0 }}
+          ref={menuRef}
+          className="fixed z-[9999] min-w-[180px] rounded-[var(--r-lg)] border border-[var(--line)] bg-panel p-1 shadow-[var(--shadow-md)]"
+          style={{ top: pos.top, right: pos.right }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
         >
+          {/* Move to space (expands inline rather than a flyout to keep position math simple) */}
+          <button
+            type="button"
+            onClick={(e) => { e.preventDefault(); setMoveOpen((v) => !v); }}
+            className="flex w-full items-center justify-between rounded-[var(--r-md)] px-2 py-1.5 text-left text-[13px] text-ink-soft hover:bg-panel-soft hover:text-ink"
+          >
+            <span className="flex items-center gap-2">
+              <FolderInput size={13} strokeWidth={1.8} />
+              Move to space
+            </span>
+            <span className="font-mono text-[10px] text-muted">{moveOpen ? "▾" : "▸"}</span>
+          </button>
+          {moveOpen && (
+            <div className="mb-1 ml-2 mr-1 flex flex-col gap-0.5 border-l border-[var(--line)] pl-2">
+              <button
+                type="button"
+                onClick={(e) => { e.preventDefault(); setBoardSpace(boardId, null); setOpen(false); setMoveOpen(false); }}
+                className="flex items-center justify-between rounded-[var(--r-sm)] px-2 py-1 text-left text-[12.5px] text-ink-soft hover:bg-panel-soft hover:text-ink"
+              >
+                <span>No space</span>
+                {!currentSpaceId && <Check size={12} strokeWidth={2} className="text-[var(--accent)]" />}
+              </button>
+              {spaces.length === 0 ? (
+                <span className="px-2 py-1 text-[11.5px] text-muted">No spaces yet. Create one in the sidebar.</span>
+              ) : (
+                spaces.map((sp) => (
+                  <button
+                    key={sp.id}
+                    type="button"
+                    onClick={(e) => { e.preventDefault(); setBoardSpace(boardId, sp.id); setOpen(false); setMoveOpen(false); }}
+                    className="flex items-center justify-between rounded-[var(--r-sm)] px-2 py-1 text-left text-[12.5px] text-ink-soft hover:bg-panel-soft hover:text-ink"
+                  >
+                    <span className="truncate">{sp.name}</span>
+                    {currentSpaceId === sp.id && <Check size={12} strokeWidth={2} className="text-[var(--accent)]" />}
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+
+          <div className="my-1 h-px bg-[var(--line)]" />
+
           <button
             type="button"
             onClick={(e) => { e.preventDefault(); if (confirm(`Delete "${boardName}"?`)) deleteBoard(boardId); setOpen(false); }}
@@ -164,7 +245,8 @@ function CardMenu({ boardId, boardName }: { boardId: string; boardName: string }
           >
             Delete board
           </button>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

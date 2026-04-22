@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { use, useEffect } from "react";
 import { BoardSearch } from "../../components/board-search";
 import { Canvas } from "../../components/canvas";
+import { ChatPanel } from "../../components/chat-panel";
 import { CommandPalette } from "../../components/command-palette";
 import { CreationToolbar } from "../../components/creation-toolbar";
 import { ExportModal } from "../../components/export-modal";
@@ -51,11 +52,21 @@ export default function BoardPage({
 function BoardLayout({ id }: { id: string }) {
   const presenting = useUI((s) => s.presenting);
   const { data: session } = useSession();
+  const board = useBoards((s) => s.boards.find((b) => b.id === id));
+
+  // Only establish a SignalR connection when collab is actually needed —
+  // the board has been shared with someone, or the current user isn't the owner.
+  const uid = session?.user?.id ?? "anonymous";
+  const collabEnabled = Boolean(
+    (board?.sharedWith && board.sharedWith.length > 0) ||
+    (board?.userId && board.userId !== uid)
+  );
 
   useBoardCollab({
     boardId: id,
-    userId: session?.user?.id ?? "anonymous",
+    userId: uid,
     userName: session?.user?.name ?? session?.user?.email ?? "Anonymous",
+    enabled: collabEnabled,
   });
 
   return (
@@ -71,6 +82,7 @@ function BoardLayout({ id }: { id: string }) {
           <FramesPanel />
           <HistoryPanel />
           <BoardSearch />
+          <ChatPanel />
         </>
       )}
       <CommandPalette />

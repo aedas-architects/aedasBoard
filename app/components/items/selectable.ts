@@ -102,10 +102,15 @@ export function useItemPointerHandler(id: ItemId) {
     // handle the gesture by NOT stopping propagation.
     if (active === "eraser" || active === "connector") return;
 
-    // Frames are containers — only select/hand modes interact with them.
-    // Creation tools (sticky, text, shape, pen, etc.) fall through to place inside.
-    const item = items.find((it) => it.id === id);
+    // Creation tools (sticky, text, shape, pen, highlighter, frame, comment)
+    // should always draw a new item at the pointer — even if that pointer is
+    // over an existing shape. Fall through to the canvas instead of selecting.
     const isNavigationMode = active === "select" || active === "hand";
+    if (!isNavigationMode) return;
+
+    const item = items.find((it) => it.id === id);
+    // (Frames guard kept as a safety net; `isNavigationMode` above already
+    // handles creation modes.)
     if (item?.type === "frame" && !isNavigationMode) return;
 
     e.stopPropagation();
@@ -129,9 +134,11 @@ export function useItemPointerHandler(id: ItemId) {
       useBoard.getState().duplicateInPlace();
     }
 
-    // Bring the picked-up selection to the top so it isn't obscured while
-    // being moved (matches Miro / Figma behavior).
-    useBoard.getState().bringToFront();
+    // Note: we intentionally do NOT auto bringToFront on select here.
+    // That would clobber any explicit "Send to back" the user has applied
+    // the next time they click the shape. Miro/Figma only re-order when
+    // you drag; they select without reordering. If you need the Figma-style
+    // temporary raise during drag, do it in the drag gesture, not here.
 
     const fresh = useBoard.getState();
     const withFrameChildren = expandWithFrameChildren(fresh.selectedIds, fresh.items);

@@ -56,6 +56,16 @@ export async function PATCH(req: Request, { params }: Params) {
   }
 }
 
+// POST /api/boards/[id] — fallback for sendBeacon which can only POST.
+// Requires ?method=PATCH query param; delegates to PATCH.
+export async function POST(req: Request, ctx: Params) {
+  const url = new URL(req.url);
+  if (url.searchParams.get("method") !== "PATCH") {
+    return Response.json({ error: "Method not allowed" }, { status: 405 });
+  }
+  return PATCH(req, ctx);
+}
+
 // DELETE /api/boards/[id]
 export async function DELETE(_req: Request, { params }: Params) {
   const session = await auth();

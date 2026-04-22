@@ -1,12 +1,19 @@
 "use client";
 
 import { create } from "zustand";
+import { useSpaces } from "./spaces-store";
 export type BoardMeta = {
   id: string;
   name: string;
   icon: "folder" | "user" | "flow" | "grid";
   createdAt: number;
   updatedAt: number;
+  /** Set on boards that aren't owned by the current user. */
+  userId?: string;
+  /** User IDs the board is shared with; empty/undefined = solo board. */
+  sharedWith?: string[];
+  /** Space this board is filed under (owner-scoped). */
+  spaceId?: string;
 };
 
 type BoardsState = {
@@ -55,6 +62,11 @@ export const useBoards = create<BoardsState>((set, get) => ({
       if (!res.ok) return; // 401 = not logged in yet, 500 = DB not configured
       const boards: BoardMeta[] = await res.json();
       set({ boards });
+      // Push board → space assignments into the spaces store so the sidebar
+      // and filters can key off spaceId without re-fetching per board.
+      useSpaces.getState().syncBoardAssignments(
+        boards.map((b) => ({ id: b.id, spaceId: b.spaceId })),
+      );
     } catch {
       // Network error or DB not configured — boards stay empty.
     }
@@ -110,7 +122,8 @@ export const useBoards = create<BoardsState>((set, get) => ({
     const src = get().boards.find((b) => b.id === sourceId);
     if (!src) return null;
     const now = Date.now();
-    const copy: BoardMeta = { id: uid(), name: `${src.name} (copy)`, icon: src.icon, createdAt: now, updatedAt: now };
+    // Carry spaceId so the copy stays filed in the same space as the original.
+    const copy: BoardMeta = { id: uid(), name: `${src.name} (copy)`, icon: src.icon, createdAt: now, updatedAt: now, spaceId: src.spaceId };
 
     // Optimistic add.
     set({ boards: [copy, ...get().boards] });

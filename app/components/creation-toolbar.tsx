@@ -72,9 +72,10 @@ function ConnectorIcon({ size = 17, strokeWidth = 1.8 }: { size?: number; stroke
   );
 }
 
-const navTools: ToolDef[] = [
-  { id: "select", label: "Select", shortcut: "V", icon: MousePointer2 },
-];
+// The nav slot toggles between Select and Hand — same button, click the
+// active one to switch modes. The icon/label update to reflect current tool.
+const selectToolDef: ToolDef = { id: "select", label: "Select", shortcut: "V", icon: MousePointer2 };
+const handToolDef: ToolDef = { id: "hand", label: "Hand (pan)", shortcut: "H", icon: Hand };
 
 // Primary creation tools — ordered to match Miro's vertical toolbar.
 const contentTools: ToolDef[] = [
@@ -96,7 +97,7 @@ const structureTools: ToolDef[] = [
   { id: "more", label: "More", shortcut: "", icon: Plus },
 ];
 
-const toolIndex = [...navTools, ...contentTools, ...structureTools];
+const toolIndex = [selectToolDef, handToolDef, ...contentTools, ...structureTools];
 
 function ToolButton({
   tool,
@@ -656,6 +657,16 @@ export function CreationToolbar() {
       setMoreOpen((v) => !v);
       return;
     }
+    // The select/hand slot is a toggle: clicking the active one flips to the
+    // other nav mode instead of being a no-op.
+    if (id === "select" && active === "select") {
+      setActive("hand");
+      return;
+    }
+    if (id === "hand" && active === "hand") {
+      setActive("select");
+      return;
+    }
     setActive(id);
   };
 
@@ -691,15 +702,18 @@ export function CreationToolbar() {
       initial={false}
       className="flex flex-col items-center gap-0.5 rounded-[var(--r-2xl)] border border-[var(--line)] bg-panel p-1.5 shadow-[var(--shadow-md)]"
     >
-      {navTools.map((t) => (
-        <ToolButton
-          key={t.id}
-          tool={t}
-          active={active === t.id}
-          onClick={() => handleToolClick(t.id)}
-          stagger={staggerFor(t.id)}
-        />
-      ))}
+      {/* Single nav slot — icon reflects current mode; clicking toggles. */}
+      {(() => {
+        const navTool = active === "hand" ? handToolDef : selectToolDef;
+        return (
+          <ToolButton
+            tool={navTool}
+            active={active === "select" || active === "hand"}
+            onClick={() => handleToolClick(navTool.id)}
+            stagger={staggerFor(navTool.id)}
+          />
+        );
+      })()}
       <span className="my-1 h-px w-7 bg-[var(--line)]" />
       {contentTools.map((t) => (
         <ToolButton
