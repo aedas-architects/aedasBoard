@@ -62,7 +62,16 @@ export type ShapeItem = ItemBase & {
   strokeDash?: StrokeDash;
 };
 
-export type FontFamily = "sans" | "serif" | "mono";
+export type FontFamily =
+  | "sans"
+  | "serif"
+  | "mono"
+  | "playfair"
+  | "lora"
+  | "poppins"
+  | "montserrat"
+  | "space-mono"
+  | "caveat";
 export type TextAlign = "left" | "center" | "right";
 
 export type TextItem = ItemBase & {

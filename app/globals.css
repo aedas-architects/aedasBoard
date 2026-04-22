@@ -66,8 +66,10 @@
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-serif: var(--font-instrument-serif), "Iowan Old Style",
     "Apple Garamond", "Baskerville", serif;
-  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular,
-    monospace;
+  /* The "mono" utility now renders Inter — we no longer ship JetBrains Mono.
+     Meta/caption text keeps its distinct look via small size, uppercase, and
+     letter-spacing, not via a monospaced typeface. */
+  --font-mono: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
 
   --radius-xs: var(--r-xs);
   --radius-sm: var(--r-sm);

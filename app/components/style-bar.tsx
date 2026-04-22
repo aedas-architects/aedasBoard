@@ -48,10 +48,25 @@ const SWATCHES = [
   "var(--sticky-ink)",
 ];
 
-const FAMILIES: { id: FontFamily; label: string; className: string }[] = [
+/** Each font offered in the text-tool picker. `className` is used for the
+ *  built-in aliases we ship Tailwind utilities for; `style` is used for
+ *  Google-Font-only entries we expose through CSS variables.
+ *  `preview` is what shows in the dropdown — set to the font name itself
+ *  so users can read each option in its own typeface. */
+const FAMILIES: {
+  id: FontFamily;
+  label: string;
+  className?: string;
+  style?: React.CSSProperties;
+}[] = [
   { id: "sans", label: "Inter", className: "font-sans" },
-  { id: "serif", label: "Instrument", className: "font-serif" },
-  { id: "mono", label: "JetBrains", className: "font-mono" },
+  { id: "serif", label: "Instrument Serif", className: "font-serif" },
+  { id: "playfair", label: "Playfair Display", style: { fontFamily: "var(--font-playfair)" } },
+  { id: "lora", label: "Lora", style: { fontFamily: "var(--font-lora)" } },
+  { id: "poppins", label: "Poppins", style: { fontFamily: "var(--font-poppins)" } },
+  { id: "montserrat", label: "Montserrat", style: { fontFamily: "var(--font-montserrat)" } },
+  { id: "space-mono", label: "Space Mono", style: { fontFamily: "var(--font-space-mono)" } },
+  { id: "caveat", label: "Caveat", style: { fontFamily: "var(--font-caveat)" } },
 ];
 
 const FONT_SIZES = [12, 14, 16, 18, 20, 24, 28, 32, 40, 56, 72];
@@ -520,7 +535,8 @@ function TextControls({
                   applyAll({ fontFamily: f.id, serif: undefined });
                   setFontOpen(false);
                 }}
-                className={f.className}
+                className={f.className ?? ""}
+                style={f.style}
               >
                 {f.label}
               </DropItem>
@@ -1193,16 +1209,19 @@ function DropItem({
   onClick,
   active,
   className = "",
+  style,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   active?: boolean;
   className?: string;
+  style?: React.CSSProperties;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      style={style}
       className={`flex w-full items-center rounded-[var(--r-md)] px-2 py-1.5 text-left text-[13px] ${
         active ? "bg-panel-soft text-ink" : "text-ink-soft hover:bg-panel-soft"
       } ${className}`}

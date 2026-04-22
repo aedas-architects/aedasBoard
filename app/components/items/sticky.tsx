@@ -2,17 +2,12 @@
 
 import { motion } from "motion/react";
 import { useBoard, type FontFamily, type StickyItem } from "../../lib/board-store";
+import { fontFamilyProps } from "../../lib/font-family";
 import { useViewport } from "../../lib/viewport-store";
 import { EditableText } from "./editable-text";
 import { LockBadge } from "./lock-badge";
 import { ResizeHandles } from "./resize-handles";
 import { useItemDoubleClick, useItemPointerHandler } from "./selectable";
-
-const FAMILY_CLASS: Record<FontFamily, string> = {
-  sans: "font-sans",
-  serif: "font-serif",
-  mono: "font-mono",
-};
 
 export function Sticky({ item, selected }: { item: StickyItem; selected: boolean }) {
   const onPointerDown = useItemPointerHandler(item.id);
@@ -26,9 +21,10 @@ export function Sticky({ item, selected }: { item: StickyItem; selected: boolean
   const showHandles = selected && selectionCount === 1 && !editing;
 
   const family: FontFamily = item.fontFamily ?? "sans";
+  const familyProps = fontFamilyProps(family);
   const textClasses = [
     "break-words whitespace-pre-wrap",
-    FAMILY_CLASS[family],
+    familyProps.className,
     item.italic ? "italic" : "",
     item.underline ? "underline" : "",
   ]
@@ -71,6 +67,7 @@ export function Sticky({ item, selected }: { item: StickyItem; selected: boolean
             fontWeight: item.fontWeight ?? 500,
             lineHeight: 1.35,
             textAlign: item.align ?? "left",
+            ...(familyProps.style ?? {}),
           }}
         />
       </div>

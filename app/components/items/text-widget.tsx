@@ -1,17 +1,12 @@
 "use client";
 
 import { useBoard, type FontFamily, type TextItem } from "../../lib/board-store";
+import { fontFamilyProps } from "../../lib/font-family";
 import { useViewport } from "../../lib/viewport-store";
 import { EditableText } from "./editable-text";
 import { LockBadge } from "./lock-badge";
 import { ResizeHandles } from "./resize-handles";
 import { useItemDoubleClick, useItemPointerHandler } from "./selectable";
-
-const FAMILY_CLASS: Record<FontFamily, string> = {
-  sans: "font-sans",
-  serif: "font-serif",
-  mono: "font-mono",
-};
 
 export function TextWidget({ item, selected }: { item: TextItem; selected: boolean }) {
   const onPointerDown = useItemPointerHandler(item.id);
@@ -32,9 +27,10 @@ export function TextWidget({ item, selected }: { item: TextItem; selected: boole
   const outlineVisible = editing || selected;
 
   const family: FontFamily = item.fontFamily ?? (item.serif ? "serif" : "sans");
+  const familyProps = fontFamilyProps(family);
   const textClasses = [
     "text-ink whitespace-pre-wrap break-words",
-    FAMILY_CLASS[family],
+    familyProps.className,
     item.italic ? "italic" : "",
     item.underline ? "underline" : "",
   ]
@@ -76,6 +72,7 @@ export function TextWidget({ item, selected }: { item: TextItem; selected: boole
             lineHeight: 1.2,
             textAlign: item.align ?? "left",
             color: item.color,
+            ...(familyProps.style ?? {}),
           }}
         />
 
