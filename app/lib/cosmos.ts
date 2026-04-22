@@ -147,7 +147,8 @@ export async function getBoardById(boardId: string): Promise<BoardDoc | null> {
 export async function listBoards(userId: string): Promise<BoardDoc[]> {
   const { resources } = await getContainer()
     .items.query<BoardDoc>({
-      query: `SELECT c.id, c.userId, c.name, c.icon, c.createdAt, c.updatedAt, c.sharedWith, c.spaceId
+      query: `SELECT c.id, c.userId, c.name, c.icon, c.createdAt, c.updatedAt,
+                     c.sharedWith, c.spaceId, c.ownerName, c.ownerEmail
               FROM c
               WHERE c.userId = @uid OR ARRAY_CONTAINS(c.sharedWith, @uid)`,
       parameters: [{ name: "@uid", value: userId }],

@@ -281,6 +281,7 @@ export function HomeSidebar({
   starredCount,
   spaceBoardCount,
   onCreateTeam,
+  onEditTeam,
 }: {
   view: HomeView;
   onViewChange: (v: HomeView) => void;
@@ -292,6 +293,7 @@ export function HomeSidebar({
   /** Maps space.id → number of boards in that space. */
   spaceBoardCount: Record<string, number>;
   onCreateTeam: () => void;
+  onEditTeam: (id: string) => void;
 }) {
   const spaces = useSpaces((s) => s.spaces);
   const spacesHydrated = useSpaces((s) => s.hydrated);
@@ -319,7 +321,12 @@ export function HomeSidebar({
   return (
     <aside className="flex h-screen w-[260px] flex-none flex-col border-r border-[var(--line)] bg-bg">
       {/* Team switcher — workspace context at the top, Miro-style. */}
-      <TeamSwitcher view={view} onViewChange={onViewChange} onCreateTeam={onCreateTeam} />
+      <TeamSwitcher
+        view={view}
+        onViewChange={onViewChange}
+        onCreateTeam={onCreateTeam}
+        onEditTeam={onEditTeam}
+      />
 
       {/* Search */}
       <div className="px-4">

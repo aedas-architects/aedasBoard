@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import { upsertBoard } from "@/app/lib/cosmos";
 import type { BoardDoc } from "@/app/lib/cosmos";
 import type { Item } from "@/app/lib/board-store";
+import { rateLimit, rateLimited } from "@/app/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -16,6 +17,10 @@ export async function POST(req: Request) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const uid = session.user.id;
+
+  // Imports write a full board document — cap to slow down mass-upload abuse.
+  const limit = rateLimit(`import:${uid}`, 3, 6);
+  if (!limit.ok) return rateLimited(limit);
 
   try {
     const body = await req.json() as AdsFile;
@@ -35,6 +40,6 @@ export async function POST(req: Request) {
     await upsertBoard(doc);
     return Response.json(doc, { status: 201 });
   } catch (err) {
-    return Response.json({ error: String(err) }, { status: 500 });
+    console.error("[boards-import]", err); return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }

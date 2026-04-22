@@ -109,6 +109,7 @@ export function HomeView() {
         starredCount={starredCount}
         spaceBoardCount={spaceBoardCount}
         onCreateTeam={openCreateTeam}
+        onEditTeam={openEditTeam}
       />
 
       {/* Main content */}

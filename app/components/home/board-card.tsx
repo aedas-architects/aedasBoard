@@ -2,6 +2,7 @@
 
 import { Check, Folder, FolderInput, LayoutGrid, MoreHorizontal, Star, User, Workflow } from "lucide-react";
 import { motion } from "motion/react";
+import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -257,6 +258,19 @@ export function BoardCard({ board, view = "grid" }: { board: BoardMeta; view?: "
   const starred = useBoards((s) => s.starred.includes(board.id));
   const toggleStar = useBoards((s) => s.toggleStar);
 
+  // Resolve the owner label for display:
+  //  1. Prefer the name stamped on the board doc at create time.
+  //  2. For legacy docs without that field, if this user IS the owner,
+  //     show their own session name — avoids hardcoding anyone else.
+  //  3. Otherwise fall back to "Collaborator" so we never falsely
+  //     attribute a board to a specific person.
+  const { data: session } = useSession();
+  const sessionUid = session?.user?.id;
+  const isSelfOwner = board.userId ? board.userId === sessionUid : sessionUid != null;
+  const ownerLabel =
+    board.ownerName
+      ?? (isSelfOwner ? (session?.user?.name ?? session?.user?.email ?? "You") : "Collaborator");
+
   const starBtn = (
     <button
       type="button"
@@ -286,7 +300,7 @@ export function BoardCard({ board, view = "grid" }: { board: BoardMeta; view?: "
           <div className="min-w-0">
             <div className="truncate text-[13px] font-semibold text-ink">{board.name}</div>
             <div className="truncate text-[11px] text-muted">
-              Modified by Dijo Aedas, {formatDay(board.updatedAt)}
+              Modified by {ownerLabel}, {formatDay(board.updatedAt)}
             </div>
           </div>
         </Link>
@@ -298,7 +312,7 @@ export function BoardCard({ board, view = "grid" }: { board: BoardMeta; view?: "
         <span className="text-[12.5px] text-ink-soft">{formatDay(board.updatedAt)}</span>
 
         {/* Owner */}
-        <span className="text-[12.5px] text-ink-soft">Dijo Aedas</span>
+        <span className="text-[12.5px] text-ink-soft">{ownerLabel}</span>
 
         {/* Actions */}
         <div className="flex items-center gap-0.5">
@@ -331,7 +345,7 @@ export function BoardCard({ board, view = "grid" }: { board: BoardMeta; view?: "
         <Link href={`/board/${board.id}`} className="min-w-0 flex-1">
           <div className="truncate text-[13.5px] font-semibold text-ink">{board.name}</div>
           <div className="truncate text-[11px] text-muted">
-            {formatDay(board.updatedAt)} by Dijo Aedas
+            {formatDay(board.updatedAt)} by {ownerLabel}
           </div>
         </Link>
         <div className="flex items-center gap-0.5">

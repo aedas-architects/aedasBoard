@@ -17,7 +17,7 @@ export async function GET() {
     const spaces = await listSpaces(session.user.id);
     return Response.json(spaces);
   } catch (err) {
-    return Response.json({ error: String(err) }, { status: 500 });
+    console.error("[spaces]", err); return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }
 
@@ -40,6 +40,6 @@ export async function POST(req: Request) {
     await upsertSpace(doc);
     return Response.json(doc, { status: 201 });
   } catch (err) {
-    return Response.json({ error: String(err) }, { status: 500 });
+    console.error("[spaces]", err); return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }

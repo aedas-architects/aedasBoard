@@ -14,6 +14,9 @@ export type BoardMeta = {
   sharedWith?: string[];
   /** Space this board is filed under (owner-scoped). */
   spaceId?: string;
+  /** Display info for the creator — stamped on create, used by list views. */
+  ownerName?: string;
+  ownerEmail?: string;
 };
 
 type BoardsState = {

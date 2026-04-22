@@ -21,6 +21,6 @@ export async function POST(_req: Request, { params }: Params) {
     if (!board) return Response.json({ error: "Invite invalid or expired" }, { status: 410 });
     return Response.json({ boardId: board.id, boardName: board.name });
   } catch (err) {
-    return Response.json({ error: String(err) }, { status: 500 });
+    console.error("[invite-[token]]", err); return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }

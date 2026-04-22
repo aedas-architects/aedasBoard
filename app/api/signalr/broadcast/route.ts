@@ -1,4 +1,6 @@
 import { createHmac } from "crypto";
+import { auth } from "@/auth";
+import { getBoard, getBoardById } from "@/app/lib/cosmos";
 import type { BoardOp } from "@/app/lib/use-board-collab";
 
 export const runtime = "nodejs";
@@ -24,17 +26,52 @@ function buildServerJwt(audience: string, key: string): string {
   return `${header}.${payload}.${signature}`;
 }
 
+/**
+ * Force the authenticated user's id onto an op so a client can't claim to
+ * be someone else in the broadcast payload. `chat:message` carries the id
+ * nested on `message.userId`; every other op has it at the top level.
+ * Shapes without a userId (e.g. cursor:move missing fields) are left as-is.
+ */
+function stampUserId(op: BoardOp, userId: string): BoardOp {
+  if (op.type === "chat:message") {
+    return { ...op, message: { ...op.message, userId } };
+  }
+  if ("userId" in op) {
+    return { ...op, userId } as BoardOp;
+  }
+  return op;
+}
+
 export async function POST(req: Request) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const uid = session.user.id;
+
   const cs = process.env.AZURE_SIGNALR_CONNECTION_STRING;
   if (!cs) {
     // No SignalR configured — silently succeed so local dev works without it.
     return new Response(null, { status: 204 });
   }
 
-  const { boardId, op } = await req.json() as { boardId: string; op: BoardOp };
+  const { boardId, op } = (await req.json()) as { boardId?: string; op?: BoardOp };
   if (!boardId || !op) {
     return Response.json({ error: "boardId and op required" }, { status: 400 });
   }
+
+  // The caller must be the owner or a collaborator on the board they're
+  // broadcasting to — otherwise anyone with a session could spam every
+  // board's SignalR group with fake ops.
+  let board = await getBoard(uid, boardId);
+  if (!board) board = await getBoardById(boardId);
+  if (!board) return Response.json({ error: "Not found" }, { status: 404 });
+  const canWrite = board.userId === uid || !!board.sharedWith?.includes(uid);
+  if (!canWrite) return Response.json({ error: "Forbidden" }, { status: 403 });
+
+  // Re-stamp the op's userId from the session wherever one is present, so a
+  // client can't impersonate another collaborator in the broadcast payload.
+  const stampedOp = stampUserId(op, uid);
 
   const { endpoint, key } = parseConnectionString(cs);
   const group = `board-${boardId}`;
@@ -50,7 +87,7 @@ export async function POST(req: Request) {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ target: "boardOp", arguments: [op] }),
+    body: JSON.stringify({ target: "boardOp", arguments: [stampedOp] }),
   });
 
   if (!res.ok) {

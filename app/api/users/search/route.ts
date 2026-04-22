@@ -1,5 +1,6 @@
 import { auth } from "@/auth";
 import { readGraphToken, searchPeople } from "@/app/lib/graph";
+import { rateLimit, rateLimited } from "@/app/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -12,6 +13,10 @@ export async function GET(req: Request) {
   if (!session?.user?.id) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  // Typeahead is naturally bursty — allow a burst of 15, refill 30/min.
+  const limit = rateLimit(`usearch:${session.user.id}`, 15, 30);
+  if (!limit.ok) return rateLimited(limit);
 
   const q = new URL(req.url).searchParams.get("q") ?? "";
   if (q.trim().length < 2) return Response.json([]);
@@ -29,14 +34,14 @@ export async function GET(req: Request) {
   try {
     const result = await searchPeople(token, q, 10);
     if (!result.ok) {
-      // Surface the Graph status so the client (and the dev console) can show
-      // exactly why things are empty — e.g. 403 = consent still missing,
-      // 401 = expired token, 400 = bad query.
+      // Log the raw Graph error server-side for debugging; only expose the
+      // HTTP status code to the browser. Returning raw Graph error bodies
+      // could leak tenant-internal details (object ids, tenant names, etc).
+      console.warn("[users/search] graph failed", { status: result.status, error: result.error });
       return Response.json([], {
         headers: {
           "X-Entra-Available": "false",
           "X-Entra-Reason": `graph-${result.status}`,
-          "X-Entra-Error": result.error.slice(0, 400),
         },
       });
     }
@@ -49,11 +54,11 @@ export async function GET(req: Request) {
       })),
     );
   } catch (err) {
+    console.error("[users/search]", err);
     return Response.json([], {
       headers: {
         "X-Entra-Available": "false",
         "X-Entra-Reason": "unexpected-exception",
-        "X-Entra-Error": String(err).slice(0, 400),
       },
     });
   }

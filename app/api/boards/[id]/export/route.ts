@@ -1,5 +1,5 @@
 import { auth } from "@/auth";
-import { getBoard } from "@/app/lib/cosmos";
+import { getBoard, getBoardById } from "@/app/lib/cosmos";
 
 export const runtime = "nodejs";
 
@@ -8,11 +8,18 @@ type Params = { params: Promise<{ id: string }> };
 export async function GET(_req: Request, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const uid = session.user.id;
   const { id } = await params;
 
   try {
-    const doc = await getBoard(session.user.id, id);
+    // Match the GET /api/boards/[id] access model: owner OR sharedWith
+    // collaborators can export. Fast path via partition key first, then
+    // cross-partition fallback for collaborators.
+    let doc = await getBoard(uid, id);
+    if (!doc) doc = await getBoardById(id);
     if (!doc) return Response.json({ error: "Not found" }, { status: 404 });
+    const canRead = doc.userId === uid || !!doc.sharedWith?.includes(uid);
+    if (!canRead) return Response.json({ error: "Forbidden" }, { status: 403 });
 
     const adsFile = JSON.stringify({
       version: 1,
@@ -30,6 +37,7 @@ export async function GET(_req: Request, { params }: Params) {
       },
     });
   } catch (err) {
-    return Response.json({ error: String(err) }, { status: 500 });
+    console.error("[api/boards/[id]/export]", err);
+    return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }

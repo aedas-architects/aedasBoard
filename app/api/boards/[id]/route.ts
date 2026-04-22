@@ -26,7 +26,7 @@ export async function GET(_req: Request, { params }: Params) {
 
     return Response.json(doc);
   } catch (err) {
-    return Response.json({ error: String(err) }, { status: 500 });
+    console.error("[boards-[id]]", err); return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }
 
@@ -49,10 +49,22 @@ export async function PATCH(req: Request, { params }: Params) {
     const patch = await req.json() as Partial<BoardDoc>;
     // Always preserve the original owner's userId as the partition key.
     const updated: BoardDoc = { ...existing, ...patch, id, userId: existing.userId, updatedAt: Date.now() };
+
+    // Self-heal owner display info: when the real owner is the one saving,
+    // refresh ownerName/ownerEmail from their current session. This backfills
+    // boards created before the ownerName stamping existed and corrects any
+    // boards that were stamped with a stale name (e.g. from an old session).
+    if (existing.userId === uid) {
+      const freshName = session.user.name ?? session.user.email ?? undefined;
+      const freshEmail = session.user.email ?? undefined;
+      if (freshName && freshName !== updated.ownerName) updated.ownerName = freshName;
+      if (freshEmail && freshEmail !== updated.ownerEmail) updated.ownerEmail = freshEmail;
+    }
+
     await upsertBoard(updated);
     return Response.json(updated);
   } catch (err) {
-    return Response.json({ error: String(err) }, { status: 500 });
+    console.error("[boards-[id]]", err); return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }
 
@@ -76,6 +88,6 @@ export async function DELETE(_req: Request, { params }: Params) {
     await deleteBoard(session.user.id, id);
     return new Response(null, { status: 204 });
   } catch (err) {
-    return Response.json({ error: String(err) }, { status: 500 });
+    console.error("[boards-[id]]", err); return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }

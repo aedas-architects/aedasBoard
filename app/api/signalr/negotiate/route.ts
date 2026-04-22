@@ -1,4 +1,6 @@
 import { createHmac } from "crypto";
+import { auth } from "@/auth";
+import { getBoard, getBoardById } from "@/app/lib/cosmos";
 
 export const runtime = "nodejs";
 
@@ -26,19 +28,34 @@ function buildJwt(audience: string, userId: string, key: string): string {
 }
 
 export async function POST(req: Request) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const uid = session.user.id;
+
   const cs = process.env.AZURE_SIGNALR_CONNECTION_STRING;
   if (!cs) {
     return Response.json({ error: "AZURE_SIGNALR_CONNECTION_STRING not configured" }, { status: 503 });
   }
 
-  const { userId, boardId } = await req.json() as { userId: string; boardId: string };
-  if (!userId || !boardId) {
-    return Response.json({ error: "userId and boardId required" }, { status: 400 });
+  const { boardId } = (await req.json()) as { boardId?: string };
+  if (!boardId) {
+    return Response.json({ error: "boardId required" }, { status: 400 });
   }
+
+  // Verify the caller actually has access to the board they want to join.
+  // Prevents negotiating a SignalR token scoped to a board you can't see.
+  let board = await getBoard(uid, boardId);
+  if (!board) board = await getBoardById(boardId);
+  if (!board) return Response.json({ error: "Not found" }, { status: 404 });
+  const canAccess = board.userId === uid || !!board.sharedWith?.includes(uid);
+  if (!canAccess) return Response.json({ error: "Forbidden" }, { status: 403 });
 
   const { endpoint, key } = parseConnectionString(cs);
   const clientUrl = `${endpoint}/client/?hub=${HUB}`;
-  const accessToken = buildJwt(clientUrl, userId, key);
+  // Token's `nameid` is sourced from the session — callers cannot spoof an id.
+  const accessToken = buildJwt(clientUrl, uid, key);
 
   return Response.json({ url: clientUrl, accessToken });
 }

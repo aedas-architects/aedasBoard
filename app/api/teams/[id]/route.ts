@@ -48,7 +48,7 @@ export async function PATCH(req: Request, { params }: Params) {
     await upsertTeam(updated);
     return Response.json(updated);
   } catch (err) {
-    return Response.json({ error: String(err) }, { status: 500 });
+    console.error("[teams-[id]]", err); return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }
 
@@ -61,6 +61,6 @@ export async function DELETE(_req: Request, { params }: Params) {
     await deleteTeamDoc(session.user.id, id);
     return new Response(null, { status: 204 });
   } catch (err) {
-    return Response.json({ error: String(err) }, { status: 500 });
+    console.error("[teams-[id]]", err); return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }

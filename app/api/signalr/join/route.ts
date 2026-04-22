@@ -1,4 +1,6 @@
 import { createHmac } from "crypto";
+import { auth } from "@/auth";
+import { getBoard, getBoardById } from "@/app/lib/cosmos";
 
 export const runtime = "nodejs";
 
@@ -23,13 +25,26 @@ function buildServerJwt(audience: string, key: string): string {
 
 // POST /api/signalr/join — add a connection to the board group
 export async function POST(req: Request) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const uid = session.user.id;
+
   const cs = process.env.AZURE_SIGNALR_CONNECTION_STRING;
   if (!cs) return new Response(null, { status: 204 }); // SignalR not configured — silent
 
-  const { boardId, connectionId } = await req.json() as { boardId: string; connectionId: string };
+  const { boardId, connectionId } = (await req.json()) as { boardId?: string; connectionId?: string };
   if (!boardId || !connectionId) {
     return Response.json({ error: "boardId and connectionId required" }, { status: 400 });
   }
+
+  // Only let the caller join SignalR groups for boards they can access.
+  let board = await getBoard(uid, boardId);
+  if (!board) board = await getBoardById(boardId);
+  if (!board) return Response.json({ error: "Not found" }, { status: 404 });
+  const canAccess = board.userId === uid || !!board.sharedWith?.includes(uid);
+  if (!canAccess) return Response.json({ error: "Forbidden" }, { status: 403 });
 
   const { endpoint, key } = parseConnectionString(cs);
   const group = `board-${boardId}`;

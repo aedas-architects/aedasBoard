@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "motion/react";
-import { Check, Plus, Users } from "lucide-react";
+import { Check, Pencil, Plus, Trash2, Users } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTeams } from "../../lib/teams-store";
 import type { HomeView } from "./home-sidebar";
@@ -37,12 +37,15 @@ export function TeamSwitcher({
   view,
   onViewChange,
   onCreateTeam,
+  onEditTeam,
 }: {
   view: HomeView;
   onViewChange: (v: HomeView) => void;
   onCreateTeam: () => void;
+  onEditTeam: (id: string) => void;
 }) {
   const teams = useTeams((s) => s.teams);
+  const deleteTeam = useTeams((s) => s.deleteTeam);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -135,30 +138,77 @@ export function TeamSwitcher({
               const isActive = activeTeam?.id === t.id;
               const c = teamColor(t.id);
               return (
-                <button
+                <div
                   key={t.id}
-                  type="button"
-                  onClick={() => {
-                    onViewChange({ type: "team", id: t.id });
-                    setOpen(false);
-                  }}
-                  className="flex w-full items-center gap-2.5 rounded-[var(--r-md)] px-2 py-1.5 text-left hover:bg-panel-soft"
-                  role="menuitem"
+                  className="group flex w-full items-center gap-2.5 rounded-[var(--r-md)] px-2 py-1.5 text-left hover:bg-panel-soft"
                 >
-                  <div
-                    className="flex h-6 w-6 flex-none items-center justify-center rounded-[var(--r-sm)] text-[9.5px] font-semibold text-white"
-                    style={{ background: c }}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onViewChange({ type: "team", id: t.id });
+                      setOpen(false);
+                    }}
+                    className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+                    role="menuitem"
                   >
-                    {teamInitials(t.name)}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[12.5px] text-ink">{t.name}</div>
-                    <div className="truncate font-mono text-[10px] text-muted">
-                      {t.members.length} {t.members.length === 1 ? "member" : "members"}
+                    <div
+                      className="flex h-6 w-6 flex-none items-center justify-center rounded-[var(--r-sm)] text-[9.5px] font-semibold text-white"
+                      style={{ background: c }}
+                    >
+                      {teamInitials(t.name)}
                     </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[12.5px] text-ink">{t.name}</div>
+                      <div className="truncate font-mono text-[10px] text-muted">
+                        {t.members.length} {t.members.length === 1 ? "member" : "members"}
+                      </div>
+                    </div>
+                  </button>
+
+                  {/* Per-row actions — reachable for every team from the sidebar,
+                      not just the one currently open in the detail view. */}
+                  <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onEditTeam(t.id);
+                        setOpen(false);
+                      }}
+                      className="flex h-6 w-6 items-center justify-center rounded-[var(--r-sm)] text-muted hover:bg-panel hover:text-ink"
+                      aria-label={`Edit ${t.name}`}
+                      title="Edit team"
+                    >
+                      <Pencil size={11} strokeWidth={1.8} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (confirm(`Delete "${t.name}"?`)) {
+                          deleteTeam(t.id);
+                          if (view.type === "team" && view.id === t.id) {
+                            onViewChange({ type: "home" });
+                          }
+                          setOpen(false);
+                        }
+                      }}
+                      className="flex h-6 w-6 items-center justify-center rounded-[var(--r-sm)] text-muted hover:bg-panel hover:text-red-500"
+                      aria-label={`Delete ${t.name}`}
+                      title="Delete team"
+                    >
+                      <Trash2 size={11} strokeWidth={1.8} />
+                    </button>
                   </div>
-                  {isActive && <Check size={12} strokeWidth={2} className="text-[var(--accent)]" />}
-                </button>
+
+                  {isActive && (
+                    <Check
+                      size={12}
+                      strokeWidth={2}
+                      className="text-[var(--accent)] group-hover:hidden"
+                    />
+                  )}
+                </div>
               );
             })}
 

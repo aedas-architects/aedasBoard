@@ -77,7 +77,12 @@ async function searchPeopleFilter(
   q: string,
   top: number,
 ): Promise<GraphSearchResult> {
-  const safe = q.replace(/'/g, "''");
+  // Whitelist characters that can appear in a name/email/UPN. Rejects
+  // anything that could alter the OData expression (parentheses, quotes,
+  // operators like ` or `, backslashes, etc).
+  const sanitized = q.replace(/[^A-Za-z0-9 .\-_@]/g, "").slice(0, 64);
+  if (!sanitized) return { ok: true, users: [] };
+  const safe = sanitized.replace(/'/g, "''");
   const filterExpr =
     `startswith(displayName,'${safe}') ` +
     `or startswith(userPrincipalName,'${safe}') ` +

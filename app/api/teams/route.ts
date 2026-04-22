@@ -26,7 +26,7 @@ export async function GET() {
     const teams = await listTeams(session.user.id);
     return Response.json(teams);
   } catch (err) {
-    return Response.json({ error: String(err) }, { status: 500 });
+    console.error("[teams]", err); return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }
 
@@ -48,6 +48,6 @@ export async function POST(req: Request) {
     await upsertTeam(doc);
     return Response.json(doc, { status: 201 });
   } catch (err) {
-    return Response.json({ error: String(err) }, { status: 500 });
+    console.error("[teams]", err); return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }
