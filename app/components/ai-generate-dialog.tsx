@@ -42,13 +42,30 @@ function firstNameFromEmail(email?: string) {
 
 /** Re-id items so AI-generated ids don't collide with existing ones. Fix
  *  connector endpoint references to the remapped ids. */
+// Keep in sync with ShapeKind in board-store / shape-geom. Anything outside
+// this set renders as an empty SVG and could crash the geometry helpers.
+const SUPPORTED_SHAPE_KINDS = new Set([
+  "rectangle", "rounded", "oval", "triangle", "rhombus", "pentagon",
+  "hexagon", "octagon", "star", "arrow-right", "arrow-left", "double-arrow",
+  "parallelogram", "trapezoid", "cross", "callout", "cylinder", "cloud",
+  "brace-left", "brace-right",
+]);
+const SUPPORTED_ITEM_TYPES = new Set([
+  "sticky", "text", "shape", "frame", "stroke", "connector", "comment", "image", "group",
+]);
+
 function remapItems(raw: unknown[]): Item[] {
   const idMap = new Map<string, string>();
   const first: Item[] = [];
   for (const candidate of raw) {
     if (!candidate || typeof candidate !== "object") continue;
-    const c = candidate as Partial<Item> & { id?: string };
-    if (!c.type) continue;
+    const c = candidate as Partial<Item> & { id?: string; kind?: string };
+    if (!c.type || !SUPPORTED_ITEM_TYPES.has(c.type)) continue;
+    // Fall back any unsupported shape kind to `rectangle` so a model that
+    // hallucinates (e.g. "heart") can't blow up the geometry renderer.
+    if (c.type === "shape" && c.kind && !SUPPORTED_SHAPE_KINDS.has(c.kind)) {
+      (c as { kind: string }).kind = "rectangle";
+    }
     const fresh = newId(c.type);
     if (c.id) idMap.set(c.id, fresh);
     first.push({ ...(c as Item), id: fresh, rotation: c.rotation ?? 0 });
@@ -153,8 +170,23 @@ export function AiGenerateDialog({ open, onClose }: Props) {
         body: JSON.stringify({ prompt: trimmed + contextSuffix, anchor, existingCount: existing.length }),
       });
 
-      const data = (await res.json()) as { items?: unknown[]; error?: string };
+      const data = (await res.json()) as {
+        items?: unknown[];
+        message?: string;
+        error?: string;
+      };
       if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
+
+      // Model explicitly declined (empty items + message). Surface the
+      // explanation in the chat without treating it as an error.
+      if (Array.isArray(data.items) && data.items.length === 0 && data.message) {
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: data.message! },
+        ]);
+        return;
+      }
+
       if (!Array.isArray(data.items) || data.items.length === 0)
         throw new Error("The model didn't return any items.");
 

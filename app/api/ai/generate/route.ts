@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/auth";
+import { rateLimit, rateLimited } from "@/app/lib/rate-limit";
 
 /**
  * AI board generation — Azure OpenAI Foundry bridge.
@@ -24,7 +26,7 @@ Allowed item types and their extra fields:
 
 2. "text" — pure text label. Required extras: "text" (string), "fontSize" (number, default 20). Optional: "fontFamily" ("sans"|"serif"|"mono"), "fontWeight" (400-700), "align" ("left"|"center"|"right"), "autoSize" (boolean), "color" (CSS color).
 
-3. "shape" — geometric shape. Required extras: "kind" (one of: "rectangle","rounded","oval","triangle","rhombus","pentagon","hexagon","octagon","star","arrow-right","arrow-left","double-arrow","parallelogram","trapezoid","cross","callout","cylinder","cloud","brace-left","brace-right"), "text" (string, may be empty), "fill" (CSS color, usually "#FFFFFF"), "stroke" (CSS color, usually "var(--ink)"). Sensible size 180x120 or 140x140.
+3. "shape" — geometric shape. Required extras: "kind" (MUST be exactly one of: "rectangle","rounded","oval","triangle","rhombus","pentagon","hexagon","octagon","star","arrow-right","arrow-left","double-arrow","parallelogram","trapezoid","cross","callout","cylinder","cloud","brace-left","brace-right"), "text" (string, may be empty), "fill" (CSS color, usually "#FFFFFF"), "stroke" (CSS color, usually "var(--ink)"). Sensible size 180x120 or 140x140.
 
 4. "frame" — titled container. Required extras: "title" (string). Frames act as groups; put related items geometrically inside. Typical size 720x420.
 
@@ -44,7 +46,13 @@ Design rules:
 - Always give connectors item-reference endpoints when connecting two items you just emitted — look up by id.
 - Never emit overlapping items.
 
-Output MUST be valid JSON that parses into { "items": Item[] }. No markdown, no prose, no trailing commentary.`;
+When you CAN'T fulfill the request:
+- If the user asks for something outside the capabilities above (a shape kind not in the allowed list, a 3D render, a photo, video, audio, animation, or something you can't express with the item types listed), DO NOT invent new item types or shape kinds.
+- Instead, respond with { "items": [], "message": "<one short sentence explaining what you can't do and what you suggest instead>" }.
+- Example refusal for "draw a heart": { "items": [], "message": "I can't draw a heart — our shape library doesn't include one. Want me to use a star, or sketch the outline with a freehand stroke?" }.
+- Keep the message under 160 characters, conversational and helpful. Always suggest a nearby supported alternative.
+
+Output MUST be valid JSON that parses into { "items": Item[], "message"?: string }. No markdown, no prose, no trailing commentary.`;
 
 type GenerateRequestBody = {
   prompt?: unknown;
@@ -53,6 +61,18 @@ type GenerateRequestBody = {
 };
 
 export async function POST(req: NextRequest) {
+  // Require a signed-in user — this route calls Azure OpenAI which is
+  // billable. Without auth, any drive-by request could drain your quota.
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Per-user throttle: burst of 5, refills 10/min. OpenAI is the most
+  // expensive endpoint — tighter cap than the others.
+  const limit = rateLimit(`ai:${session.user.id}`, 5, 10);
+  if (!limit.ok) return rateLimited(limit);
+
   const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
   const apiKey = process.env.AZURE_OPENAI_API_KEY;
   const deployment = process.env.AZURE_OPENAI_DEPLOYMENT;
