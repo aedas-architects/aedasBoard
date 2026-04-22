@@ -40,10 +40,11 @@ jobs:
         run: npm prune --omit=dev
 
       - name: Package artifact
-        # Zip only what App Service needs to run. Excludes .git, source maps,
-        # and the heavy Next cache directory.
+        # -y preserves symlinks (npm creates .bin/* as symlinks into package
+        # dirs; dereferencing them breaks relative requires at runtime).
+        # -q silent, -r recursive.
         run: |
-          zip -rq release.zip \
+          zip -ryq release.zip \
             .next \
             public \
             node_modules \
