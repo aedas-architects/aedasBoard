@@ -6,8 +6,7 @@ on:
   workflow_dispatch: # lets you trigger manually from the Actions tab
 
 env:
-  # Replace AZURE_WEBAPP_NAME if your app is named differently.
-  AZURE_WEBAPP_NAME: aedas-board
+  AZURE_WEBAPP_NAME: aedasbrd
   NODE_VERSION: "24.x"
 
 concurrency:
