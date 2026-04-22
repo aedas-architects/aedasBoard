@@ -1,0 +1,80 @@
+name: Deploy to Azure App Service
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # lets you trigger manually from the Actions tab
+
+env:
+  # Replace AZURE_WEBAPP_NAME if your app is named differently.
+  AZURE_WEBAPP_NAME: aedas-board
+  NODE_VERSION: "24.x"
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        # Next reads env at build time for NEXT_PUBLIC_* vars. Everything else
+        # is server-only and resolved at runtime from App Service settings.
+        env:
+          NEXT_PUBLIC_GIPHY_API_KEY: ${{ secrets.NEXT_PUBLIC_GIPHY_API_KEY }}
+        run: npm run build
+
+      - name: Prune dev dependencies
+        # Shrinks the deploy payload — App Service doesn't need ESLint etc.
+        run: npm prune --omit=dev
+
+      - name: Package artifact
+        # Zip only what App Service needs to run. Excludes .git, source maps,
+        # and the heavy Next cache directory.
+        run: |
+          zip -rq release.zip \
+            .next \
+            public \
+            node_modules \
+            package.json \
+            package-lock.json \
+            next.config.ts \
+            auth.ts \
+            middleware.ts
+          ls -lh release.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: release.zip
+          retention-days: 3
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release
+
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: release.zip
