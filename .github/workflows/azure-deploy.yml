@@ -52,7 +52,7 @@ jobs:
             package-lock.json \
             next.config.ts \
             auth.ts \
-            middleware.ts
+            proxy.ts
           ls -lh release.zip
 
       - name: Upload artifact
