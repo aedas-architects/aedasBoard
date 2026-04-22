@@ -40,6 +40,9 @@ function ShapeSVG({ item }: { item: ShapeItem }) {
       )}
       {geom.kind === "polygon" && <polygon points={geom.points} {...common} />}
       {geom.kind === "path" && <path d={geom.d} {...common} />}
+      {geom.kind === "rect" && (
+        <rect x={0} y={0} width={w} height={h} rx={geom.rx} ry={geom.rx} {...common} />
+      )}
     </svg>
   );
 }
