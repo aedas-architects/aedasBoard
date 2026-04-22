@@ -20,7 +20,7 @@ import { type Space, type SpaceIcon, useSpaces } from "../../lib/spaces-store";
 import { useTeams } from "../../lib/teams-store";
 import { TeamSwitcher } from "./team-switcher";
 
-const SPACE_ICONS: Record<SpaceIcon, React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>> = {
+const SPACE_ICONS: Record<SpaceIcon, React.ComponentType<{ size?: number; strokeWidth?: number; className?: string; style?: React.CSSProperties }>> = {
   folder: Folder,
   flow: Workflow,
   grid: LayoutGrid,
